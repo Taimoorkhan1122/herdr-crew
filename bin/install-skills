@@ -1,0 +1,174 @@
+#!/bin/bash
+# Installs persona skills missing from ~/.claude/skills. Asks before every change (default No).
+# Usage: install-skills [--check] [-y|--yes]
+#   --check   report only, change nothing; exit 1 if anything is missing
+#   -y, --yes accept every prompt (non-interactive)
+# Required = `skills:` of personas/*.md + names in skills.sources + `axi:` of personas and ranks (AXI CLIs, npm -g).
+# skills.sources lines: `<skill> <owner/repo>` | `<skill> plugin <plugin@marketplace>` | `<skill> UNKNOWN` | `<tool> axi npm:<pkg>`.
+# Prompts read /dev/tty; with no terminal the answer is No.
+
+DIR=$(cd "$(dirname "$0")/.." && pwd)
+SKILLS_DIR="$HOME/.claude/skills"
+AGENTS_DIR="$HOME/.agents/skills"
+PLUGINS_FILE="$HOME/.claude/plugins/installed_plugins.json"
+SOURCES="$DIR/skills.sources"
+CHECK=0
+YES=0
+BAD=0
+
+for arg in "$@"; do
+  case "$arg" in
+    --check) CHECK=1 ;;
+    -y|--yes) YES=1 ;;
+    -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+    *) echo "install-skills: unknown argument: $arg" >&2; exit 2 ;;
+  esac
+done
+
+# list_key KEY: values of a frontmatter list key across personas and ranks, one per line
+list_key() {
+  for f in "$DIR"/personas/*.md "$DIR"/ranks/*.md; do
+    awk -v k="$1" 'NR==1 && /^---/ {fm=1; next} fm && /^---/ {exit} fm && $0 ~ "^"k":" {sub("^"k":[ \t]*", ""); print}' "$f"
+  done | tr ',' '\n' | tr -d ' \t\r' | awk 'NF && !seen[$0]++'
+}
+
+persona_skills() { list_key skills; }
+axi_tools() { list_key axi; }
+
+# Skill names only: `<tool> axi npm:<pkg>` lines are AXI CLIs, not skills
+source_names() { awk 'NF && $1 !~ /^#/ && $2 != "axi" {print $1}' "$SOURCES" 2>/dev/null; }
+
+# Prints the source spec after the skill name (owner/repo, "plugin x@y", or UNKNOWN).
+source_spec() {
+  awk -v n="$1" '$1 == n && $1 !~ /^#/ {$1 = ""; sub(/^ +/, ""); print; exit}' "$SOURCES" 2>/dev/null
+}
+
+report() { printf '%-38s %s\n' "$1" "$2"; }
+
+check_axi() { # AXI CLI on PATH, else `npm i -g <pkg>` from its `axi npm:<pkg>` source line
+  n=$1
+  if command -v "$n" >/dev/null 2>&1; then report "$n" ok; return; fi
+  spec=$(source_spec "$n")
+  case "$spec" in
+    "axi npm:"*) pkg=${spec#axi npm:} ;;
+    *) report "$n" "MISSING (no verified source in skills.sources)"; BAD=$((BAD+1)); return ;;
+  esac
+  cmd="npm i -g $pkg"
+  if [ "$CHECK" = 1 ]; then report "$n" "MISSING (would run: $cmd)"; BAD=$((BAD+1)); return; fi
+  echo "$n: AXI tool missing"
+  echo "  will run: $cmd"
+  if confirm "Install $pkg globally with npm?"; then
+    $cmd
+    if command -v "$n" >/dev/null 2>&1; then report "$n" installed; else report "$n" FAILED; BAD=$((BAD+1)); fi
+  else
+    report "$n" "skipped"; BAD=$((BAD+1))
+  fi
+}
+
+confirm() { # $1 = question; default No
+  [ "$YES" = 1 ] && { echo "  accepted (-y)"; return 0; }
+  printf '  %s [y/N] ' "$1"
+  if ( : </dev/tty ) 2>/dev/null; then
+    ans=""
+    read -r ans </dev/tty
+  else
+    echo "  no terminal, default No"
+    return 1
+  fi
+  case "$ans" in y|Y|yes|YES) return 0 ;; esac
+  return 1
+}
+
+check_plugin() {
+  n=$1
+  p=${n%%:*}
+  if [ -f "$PLUGINS_FILE" ] && jq -e --arg p "$p" '.plugins | keys[] | select(startswith($p + "@"))' "$PLUGINS_FILE" >/dev/null 2>&1; then
+    report "$n" ok
+    return
+  fi
+  spec=$(source_spec "$n")
+  case "$spec" in
+    plugin\ *@*) plug=${spec#plugin } ;;
+    *) report "$n" "MISSING plugin '$p' (no verified source; install it manually)"; BAD=$((BAD+1)); return ;;
+  esac
+  if [ "$CHECK" = 1 ]; then
+    report "$n" "MISSING plugin (would run: claude plugin install $plug)"
+    BAD=$((BAD+1)); return
+  fi
+  echo "$n: plugin '$plug' missing"
+  echo "  will run: claude plugin install $plug"
+  if confirm "Install plugin $plug?"; then
+    claude plugin install "$plug" >/dev/null 2>&1
+    if jq -e --arg p "$p" '.plugins | keys[] | select(startswith($p + "@"))' "$PLUGINS_FILE" >/dev/null 2>&1; then
+      report "$n" installed
+    else
+      report "$n" FAILED; BAD=$((BAD+1))
+    fi
+  else
+    report "$n" "skipped"; BAD=$((BAD+1))
+  fi
+}
+
+check_skill() {
+  n=$1
+  t="$SKILLS_DIR/$n"
+  if [ -f "$t/SKILL.md" ]; then report "$n" ok; return; fi
+
+  broken=0
+  if [ -L "$t" ] && [ ! -e "$t" ]; then broken=1; fi
+  if [ -e "$t" ] || { [ -L "$t" ] && [ "$broken" = 0 ]; }; then
+    report "$n" "BLOCKED (exists, no SKILL.md; not touched)"; BAD=$((BAD+1)); return
+  fi
+
+  if [ -f "$AGENTS_DIR/$n/SKILL.md" ]; then
+    if [ "$CHECK" = 1 ]; then
+      report "$n" "MISSING (in ~/.agents, unlinked)"; BAD=$((BAD+1)); return
+    fi
+    echo "$n: in ~/.agents/skills but not linked"
+    echo "  will run: ln -s ../../.agents/skills/$n $t"
+    [ "$broken" = 1 ] && echo "  (replaces broken link)"
+    if confirm "Link $n?"; then
+      [ "$broken" = 1 ] && rm -f "$t"
+      ln -s "../../.agents/skills/$n" "$t"
+      if [ -f "$t/SKILL.md" ]; then report "$n" linked; else report "$n" FAILED; BAD=$((BAD+1)); fi
+    else
+      report "$n" "skipped"; BAD=$((BAD+1))
+    fi
+    return
+  fi
+
+  spec=$(source_spec "$n")
+  case "$spec" in
+    */*) ;;
+    *) report "$n" "MISSING (no verified source in skills.sources)"; BAD=$((BAD+1)); return ;;
+  esac
+  cmd="npx -y skills add $spec --skill $n -g -a claude-code -y"
+  if [ "$CHECK" = 1 ]; then
+    report "$n" "MISSING (would run: $cmd)"; BAD=$((BAD+1)); return
+  fi
+  echo "$n: missing"
+  echo "  will run: $cmd"
+  if confirm "Install $n from $spec?"; then
+    $cmd
+    if [ -f "$t/SKILL.md" ]; then report "$n" installed; else report "$n" FAILED; BAD=$((BAD+1)); fi
+  else
+    report "$n" "skipped"; BAD=$((BAD+1))
+  fi
+}
+
+REQUIRED=$({ persona_skills; source_names; } | awk 'NF && !seen[$0]++')
+for name in $REQUIRED; do
+  case "$name" in
+    *:*) check_plugin "$name" ;;
+    *) check_skill "$name" ;;
+  esac
+done
+
+for name in $(axi_tools); do check_axi "$name"; done
+
+if [ "$BAD" -gt 0 ]; then
+  echo "install-skills: $BAD item(s) missing or not installed"
+  exit 1
+fi
+echo "install-skills: all required skills present"
+exit 0

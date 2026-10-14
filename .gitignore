@@ -1,0 +1,32 @@
+# Local agent state and review artifacts
+/.superpowers/
+/.lavish/
+/.claude/
+/.herdr/
+
+# Secrets and machine-specific configuration
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+
+# Editor and operating-system files
+.DS_Store
+._*
+.idea/
+.vscode/
+*~
+*.swp
+*.swo
+
+# Generated files and local dependencies
+*.log
+*.tmp
+node_modules/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+coverage/

@@ -1,0 +1,28 @@
+# <skill> <owner/repo> | <skill> plugin <plugin@marketplace> | <skill> UNKNOWN | <tool> axi npm:<pkg> (AXI CLI, npm -g)
+# Verified from ~/.agents/.skill-lock.json (or `npx skills ls -g`). "local" or missing source = UNKNOWN.
+code-review mattpocock/skills
+ponytail-review DietrichGebert/ponytail
+tdd mattpocock/skills
+verification-before-completion obra/superpowers
+karpathy-guidelines multica-ai/andrej-karpathy-skills
+ponytail DietrichGebert/ponytail
+diagnosing-bugs mattpocock/skills
+systematic-debugging obra/superpowers
+qa-bug-validator UNKNOWN
+nestjs-best-practices Kadajett/agent-nestjs-skills
+react-production-engineering UNKNOWN
+react-component-engineering UNKNOWN
+react-quality-engineering UNKNOWN
+impeccable UNKNOWN
+design-taste-frontend Leonxlnx/taste-skill
+emil-design-eng emilkowalski/skills
+web-design-guidelines vercel-labs/agent-skills
+vercel-react-best-practices vercel-labs/agent-skills
+ponytail:ponytail-review plugin ponytail@ponytail
+context7-mcp UNKNOWN
+supabase supabase/agent-skills
+supabase-postgres-best-practices supabase/agent-skills
+gh-axi axi npm:gh-axi
+chrome-devtools-axi axi npm:chrome-devtools-axi
+lavish-axi axi npm:lavish-axi
+quota-axi axi npm:quota-axi

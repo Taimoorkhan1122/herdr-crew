@@ -1,0 +1,567 @@
+#!/usr/bin/env bash
+# herdr-crew: deterministic crew launcher for Herdr. All logic lives here.
+# CREW_DRY_RUN=1 prints every mutating herdr/git/tsk call ("+ ..." on stderr) instead of running it.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+RANKS="lead manager member inspector"
+die() { echo "herdr-crew: $*" >&2; exit 1; }
+# mut CMD...: mutating command (dry-run: echo only)
+mut() { if [[ -n "${CREW_DRY_RUN:-}" ]]; then echo "+ $*" >&2; else "$@"; fi; }
+# mutj FAKE_JSON CMD...: mutating command whose JSON stdout is needed
+mutj() { local fake=$1; shift; if [[ -n "${CREW_DRY_RUN:-}" ]]; then echo "+ $*" >&2; echo "$fake"; else "$@"; fi; }
+
+for c in tsk jq herdr; do command -v "$c" >/dev/null || die "$c not found (tsk: brew install smarzban/tap/tsk)"; done
+
+# Repo and slug. Slug = 6 chars of the basename + 4 hex of the repo path, so same-named repos differ.
+# Panes crew creates carry CREW_* so worktree subshells keep the main repo's identity.
+REPO="${CREW_REPO:-$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)}"
+SLUG="${CREW_SLUG:-$(printf %s "$(basename "$REPO")" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' | cut -c1-6)-$(printf %s "$REPO" | shasum | cut -c1-4)}"
+[[ "$SLUG" =~ ^[a-z] ]] || SLUG="x$SLUG"
+ME="${CREW_AGENT:-user}"
+SDIR="$HOME/.herdr/crew/$SLUG"  # per-crew state: agent meta and briefs (restart), handoff files
+
+rank_file() { echo "$ROOT/ranks/crew-$1.md"; }
+pfile() { echo "$ROOT/personas/$1.md"; }
+# fm KEY FILE: frontmatter value
+fm() { awk -v k="$1" 'NR==1&&/^---/{f=1;next} f&&/^---/{exit} f&&$0~"^"k":"{sub("^"k":[ ]*","");print;exit}' "$2"; }
+# body FILE: text after frontmatter
+body() { awk 'NR==1&&/^---/{f=1;next} f&&/^---/{f=0;p=1;next} p' "$1"; }
+# conf TEAM KEY
+conf() { awk -F= -v k="$2" '$1==k{sub("^[^=]*=","");print;exit}' "$ROOT/teams/$1.conf"; }
+persona_rank() { fm rank "$(pfile "$1")"; }
+persona_names() { ls "$ROOT/personas" | sed 's/\.md$//' | tr '\n' ' '; }
+# jobs_for RANK: job personas (those with rank: RANK)
+jobs_for() { local f; for f in "$ROOT"/personas/*.md; do if [[ "$(fm rank "$f")" == "$1" ]]; then basename "$f" .md; fi; done | tr '\n' ' '; }
+# team_of JOB: team whose members include the job persona
+team_of() {
+  local t m
+  for t in "$ROOT"/teams/*.conf; do
+    for m in $(conf "$(basename "$t" .conf)" members); do
+      if [[ "$m" == *@"$1" ]]; then basename "$t" .conf; return 0; fi
+    done
+  done
+  return 1
+}
+# team_jobs TEAM: job personas of a team
+team_jobs() { local m; for m in $(conf "$1" members); do if [[ "$m" == *@* ]]; then echo "${m#*@}"; fi; done; }
+# all_jobs: job personas of every team
+all_jobs() { local t; for t in "$ROOT"/teams/*.conf; do team_jobs "$(basename "$t" .conf)"; done; }
+# check_domain NAME: must be a domain persona (no rank)
+check_domain() {
+  [[ -f "$(pfile "$1")" ]] || die "unknown persona '$1'. ranks: $RANKS. personas: $(persona_names)"
+  [[ -z "$(persona_rank "$1")" ]] || die "'$1' is a job persona, not a domain persona"
+}
+# parse_spec SPEC: sets RANK, JOB (job persona), DOMAINS (space list). Dies before any command runs.
+parse_spec() {
+  local spec=$1 rank_part="" plist="" p pr
+  RANK=""; JOB=""; DOMAINS=""
+  if [[ "$spec" == *@* ]]; then rank_part=${spec%%@*}; plist=${spec#*@}; plist=${plist//+/ }
+  elif [[ " $RANKS " == *" $spec "* ]]; then rank_part=$spec
+  else plist=$spec
+  fi
+  for p in $plist; do
+    [[ -f "$(pfile "$p")" ]] || die "unknown persona '$p'. ranks: $RANKS. personas: $(persona_names)"
+    pr=$(persona_rank "$p")
+    if [[ -n "$pr" ]]; then
+      [[ -z "$JOB" ]] || die "one job persona per spec (got $JOB and $p)"
+      JOB=$p; rank_part=${rank_part:-$pr}
+    else
+      DOMAINS="${DOMAINS:+$DOMAINS }$p"
+    fi
+  done
+  [[ -n "$rank_part" ]] || die "spec '$spec': name a rank (member@driver) or a job persona (driver). ranks: $RANKS"
+  [[ " $RANKS " == *" $rank_part "* ]] || die "unknown rank '$rank_part'. ranks: $RANKS"
+  RANK=$rank_part
+  if [[ -n "$JOB" ]]; then
+    pr=$(persona_rank "$JOB")
+    [[ "$pr" == "$RANK" ]] || die "persona '$JOB' is a $pr job; use $pr@$JOB"
+  else
+    [[ "$RANK" == lead ]] || die "rank '$RANK' needs a job persona: $(jobs_for "$RANK")"
+  fi
+}
+agent_name() { echo "$SLUG-$(echo "$1" | tr '[:upper:]' '[:lower:]')-$2" | cut -c1-32; }
+# set_env NAME TASK: fills EV with the CREW_* --env args for the agent that will own the next pane.
+# herdr pane split does not inherit tab env, so every pane gets its own.
+set_env() { EV=(--env "CREW_SLUG=$SLUG" --env "CREW_TASK=$2" --env "CREW_AGENT=$1" --env "CREW_MANAGER=$SLUG-manager" --env "CREW_REPO=$REPO" --env "CREW_WS=${WS:-${CREW_WS:-${HERDR_WORKSPACE_ID:-}}}"); }
+# slot_list JOB DOMAINS: personas for a slot (job first); pragmatic-senior when no domain persona
+slot_list() { local d=${2:-pragmatic-senior}; echo "${1:+$1 }$d"; }
+# pmap_for JOB: domain personas from cmd_team's --persona args, space list
+pmap_for() { local e; for e in $pmap; do if [[ "${e%%=*}" == "$1" ]]; then echo "${e#*=}" | tr '+' ' '; return 0; fi; done; }
+# branch_exists BRANCH: local branch present in the repo
+branch_exists() { git -C "$REPO" rev-parse --verify -q "refs/heads/$1" >/dev/null 2>&1; }
+# status_of NAME: agent_status from herdr agent get (idle, working, blocked, done, unknown); empty if no such agent
+status_of() { herdr agent get "$1" 2>/dev/null | jq -r '.result.agent.agent_status // empty' 2>/dev/null || true; }
+
+# Reclaim a registry name only after the former occupant's pane reaches its shell.
+clear_stale_name() {
+  local info pane pi
+  info=$(herdr agent get "$1" 2>/dev/null) || return 0
+  pane=$(jq -r '.result.agent.pane_id // empty' <<<"$info")
+  [[ -n "$pane" ]] || return 0
+  pi=$(herdr pane process-info --pane "$pane" 2>/dev/null) || return 0
+  if jq -e '.result.process_info | .shell_pid != null and .foreground_process_group_id == .shell_pid' <<<"$pi" >/dev/null 2>&1; then
+    mut herdr agent rename "$1" --clear >/dev/null
+  fi
+}
+
+# A saved Claude SessionStart hook repopulates Bash tool env after resume.
+crew_env_hook() {
+  local exports assignment
+  set_env "$1" "$2"
+  exports=""
+  for assignment in "${EV[@]}"; do
+    [[ "$assignment" == --env ]] && continue
+    printf -v assignment '%q' "$assignment"
+    exports+="export $assignment"$'\n'
+  done
+  printf 'if [ -n "${CLAUDE_ENV_FILE:-}" ]; then printf %%s %q >> "$CLAUDE_ENV_FILE"; fi' "$exports"
+}
+
+# axi_of FILE...: deduped `axi:` tools declared by these persona or rank files (space list)
+axi_of() {
+  local f a seen=""
+  for f in "$@"; do
+    for a in $(fm axi "$f" | tr ',' ' '); do
+      case " $seen " in *" $a "*) ;; *) seen="$seen $a" ;; esac
+    done
+  done
+  echo $seen
+}
+
+# brief NAME RANK TASK TEAMMATES INSTR CWD PERSONAS: prompt text for an agent (PERSONAS: space list, job first)
+brief() {
+  local name=$1 rank=$2 task=$3 mates=$4 instr=$5 cwd=$6 plist=$7 p s a seen="" skills="" bodies="" axi="" axi_line=""
+  if [[ "$(fm kind "$(rank_file "$rank")")" == opencode ]]; then body "$(rank_file "$rank")"; echo; fi
+  axi=$(axi_of "$(rank_file "$rank")" $(for p in $plist; do pfile "$p"; done))
+  for a in $axi; do
+    command -v "$a" >/dev/null 2>&1 || echo "herdr-crew: warning: AXI tool '$a' not on PATH (run bin/install-skills)" >&2
+  done
+  [[ -z "$axi" ]] || axi_line="
+AXI tools (prefer these over raw CLIs; run with no args for a dashboard, follow help[] hints): $(echo $axi | sed 's/ /, /g')"
+  for p in $plist; do
+    for s in $(fm skills "$(pfile "$p")" | tr -d ' ' | tr ',' ' '); do
+      case " $seen " in *" $s "*) ;; *) seen="$seen $s"; skills="$skills /$s" ;; esac
+      # plugin skills (ns:name) live elsewhere; only check user skills
+      [[ "$s" == *:* || -f "$HOME/.claude/skills/$s/SKILL.md" ]] || echo "herdr-crew: warning: skill '$s' (persona $p) not installed" >&2
+    done
+    bodies="$bodies
+Persona ($p):
+$(body "$(pfile "$p")")
+"
+  done
+  cat <<BRIEF
+You are $name in crew "$SLUG".
+Rank: $rank   Task: ${task:-none yet}   tsk project: $REPO   (task state lives in tsk)
+Repo: $REPO
+Working dir: $cwd
+Lead: $SLUG-lead   Manager: $SLUG-manager   Teammates: ${mates:-none}
+Rule: run \`herdr-crew mark <T#> <status> "<note>"\` on EVERY state change (started, blocked, review, done).
+Talk to others only with \`herdr-crew say <agent> "<msg>"\`.
+Messages that were busy-queued arrive as task steps tagged [msg from X to Y]: check \`tsk list <T#> --json\` after each step.
+Context budget: ${CREW_CTX_LIMIT:-135000} tokens. A hook warns you when you reach it. Then write your handoff with \`herdr-crew handoff "<status>" <<'EOF' ... EOF\` (goal, done, in progress, next steps, files, task number). It is saved to $SDIR/handoff-$name.md. Then stop. Your initiator restarts you with the handoff.
+Load these skills now:${skills:- none}${axi_line}
+
+Personas adopt them for job and judgment. Rank rules win over persona.
+$bodies
+Instructions:
+$instr
+BRIEF
+}
+
+# target_ws: sets WS. Inside Herdr: the current workspace. Outside: the crew-<slug> workspace on the running server (reused or created)
+target_ws() {
+  if [[ "${HERDR_ENV:-}" == 1 ]]; then
+    WS="${HERDR_WORKSPACE_ID:?HERDR_WORKSPACE_ID unset}"
+  elif herdr status server >/dev/null 2>&1; then
+    WS=$(herdr workspace list | jq -r --arg l "crew-$SLUG" '[.result.workspaces[] | select(.label == $l) | .workspace_id][0] // empty')
+    if [[ -z "$WS" ]]; then
+      WS=$(mutj '{"result":{"workspace":{"workspace_id":"w_dry"}}}' \
+        herdr workspace create --label "crew-$SLUG" --cwd "$REPO" --no-focus | jq -r '.result.workspace.workspace_id')
+      echo "crew: created workspace crew-$SLUG (attach with: herdr)"
+    fi
+  else
+    die "not inside Herdr and no server running. Start Herdr with: herdr   then rerun there"
+  fi
+}
+
+# submit NAME TEXT: prompt, then press Enter again if the agent never starts working
+# (Claude can swallow the Enter that follows a large bracketed paste)
+submit() {
+  mut herdr agent prompt "$1" "$2" >/dev/null
+  [[ -n "${CREW_DRY_RUN:-}" ]] && return 0
+  local i screen
+  for i in 1 2 3 4; do
+    herdr agent wait "$1" --until working --until blocked --until done --timeout 8000 >/dev/null 2>&1 && return 0
+    screen=$(herdr agent read "$1" --source visible 2>/dev/null || true)
+    # Retry only Enter for visible pasted input. An empty box does not prove the prompt was lost.
+    if rg -qF -e '[Pasted text' -e "$(head -1 <<<"$2" | cut -c1-30)" <<<"$screen"; then
+      herdr agent send-keys "$1" enter >/dev/null
+    else
+      break
+    fi
+  done
+  echo "herdr-crew: warning: $1 did not start working; check its pane" >&2
+}
+
+# start_agent NAME RANK PANE TASK BRIEF [JOB]: start agent in pane, then send brief
+# model: rank `model:`; effort: job persona `effort:` > rank `effort:`
+start_agent() {
+  local name=$1 rank=$2 pane=$3 job=${6:-} kind args=() out text model effort settings env_hook
+  kind="$(fm kind "$(rank_file "$rank")")"; kind="${kind:-claude}"
+  if [[ "$kind" == opencode ]]; then
+    args=(--kind opencode -- --model "$(fm opencode_model "$(rank_file "$rank")")")
+  else
+    args=(--kind claude -- --agent "crew-$rank" -n "$name")
+    model=$(fm model "$(rank_file "$rank")"); effort=""
+    [[ -n "$job" ]] && effort=$(fm effort "$(pfile "$job")")
+    [[ -n "$effort" ]] || effort=$(fm effort "$(rank_file "$rank")")
+    [[ -n "$model" && "$model" != inherit ]] && args+=(--model "$model")
+    [[ -n "$effort" ]] && args+=(--effort "$effort")
+    # ctx-guard warns the agent at the context budget (PostToolUse and UserPromptSubmit)
+    env_hook=$(crew_env_hook "$name" "$4")
+    settings=$(jq -nc --arg env_hook "$env_hook" --arg c "$ROOT/bin/ctx-guard" --arg r "$rank" '{hooks:{SessionStart:[{hooks:[{type:"command",command:$env_hook}]}],PostToolUse:[{hooks:[{type:"command",command:$c}]}],UserPromptSubmit:[{hooks:[{type:"command",command:$c}]}]}} + (if $r == "member" then {permissions:{deny:["Bash(git push:*)","Bash(git merge:*)"]}} else {} end)')
+    # members: push and merge are denied here, not in agent disallowedTools (a Bash pattern there removed all of Bash)
+    args+=(--settings "$settings")
+  fi
+  clear_stale_name "$name"
+  if [[ -n "${CREW_DRY_RUN:-}" ]]; then
+    mut herdr agent start "$name" --pane "$pane" --timeout 120000 "${args[@]}"
+  elif ! out=$(herdr agent start "$name" --pane "$pane" --timeout 120000 "${args[@]}" 2>&1); then
+    [[ "$out" == *agent_not_ready* ]] || die "agent $name failed: $out"
+    text=$(herdr pane read "$pane" --source recent-unwrapped --lines 40 2>/dev/null || true)
+    grep -qi 'trust this folder' <<<"$text" || die "agent $name not ready. Pane output:"$'\n'"$text"
+    # Auto-trust, only for panes this script started. Enter alone picks "No, exit", so select "Yes" first.
+    herdr agent send-keys "$name" down >/dev/null
+    herdr agent send-keys "$name" enter >/dev/null
+    herdr agent wait "$name" --until idle --until done --timeout 120000 >/dev/null  # dialog may still show "blocked" for a moment
+  fi
+  # Save only after startup succeeds; a rejected duplicate name must keep its old state.
+  mkdir -p "$SDIR"
+  printf 'rank=%s\njob=%s\npane=%s\ntask=%s\n' "$rank" "$job" "$pane" "$4" >"$SDIR/$name.meta"
+  printf '%s\n' "$5" >"$SDIR/$name.brief"
+  submit "$name" "$5"
+}
+
+cmd_launch() {
+  local spec=${1:-} instr team
+  [[ -n "$spec" ]] || die "usage: launch <spec> - (spec: <rank>[@<persona>[+<persona>]] or a job persona)"
+  shift
+  parse_spec "$spec"
+  if [[ "${1:-}" == - ]]; then instr=$(cat); else instr="$*"; fi
+  [[ -n "${instr// /}" ]] || die "no instructions (pass them on stdin with '-')"
+
+  # A review needs the pair branch, which a new task never has. Checked before any tsk, herdr or git call.
+  if [[ "$RANK" != lead ]]; then
+    team=$(team_of "$JOB") || die "job '$JOB' is in no team (see teams/*.conf)"
+    [[ "$(conf "$team" worktree)" != pair-branch ]] || die 'review needs an existing pair task: run `herdr-crew team review T<n>` for a task that already has crew/T<n>-pair (the manager does this)'
+  fi
+
+  # Re-running lead sends the instructions to the running lead. Checked before any workspace work.
+  if [[ "$RANK" == lead ]]; then clear_stale_name "$SLUG-lead"; fi
+  if [[ "$RANK" == lead ]] && herdr agent get "$SLUG-lead" >/dev/null 2>&1; then
+    cmd_say "$SLUG-lead" "$instr"
+    echo "crew: $SLUG-lead already running, sent instructions to it"
+    return
+  fi
+
+  target_ws
+  export CREW_WS="$WS"
+
+  if [[ "$RANK" == lead ]]; then
+    local lead="$SLUG-lead" manager="$SLUG-manager" root orch board
+    # Lead tab: lead in the root pane, manager beside it, board (tsk) below. Each pane is created with its agent's env.
+    set_env "$lead" ""
+    root=$(mutj '{"result":{"tab":{"tab_id":"w_dry:t1"},"root_pane":{"pane_id":"w_dry:p1"}}}' \
+      herdr tab create --workspace "$WS" --cwd "$REPO" --label "crew $SLUG" --no-focus "${EV[@]}" \
+      | jq -r '.result.root_pane.pane_id')
+    set_env "$manager" ""
+    orch=$(mutj '{"result":{"pane":{"pane_id":"w_dry:p2"}}}' \
+      herdr pane split "$root" --direction right --cwd "$REPO" --no-focus "${EV[@]}" | jq -r '.result.pane.pane_id')
+    set_env "$SLUG-board" ""
+    board=$(mutj '{"result":{"pane":{"pane_id":"w_dry:p3"}}}' \
+      herdr pane split "$root" --direction down --ratio 0.3 --cwd "$REPO" --no-focus "${EV[@]}" | jq -r '.result.pane.pane_id')
+    mut herdr pane run "$board" "tsk"
+    start_agent "$manager" manager "$orch" "" "$(brief "$manager" manager "" "$lead" \
+      "Wait for the lead to send you task numbers (T#) via herdr-crew say. Then spawn teams: herdr-crew team <team> <T#> [--persona <job>=<domain>]... Domain personas: $(persona_names). Never edit code." \
+      "$REPO" "pragmatic-senior")"
+    start_agent "$lead" lead "$root" "" "$(brief "$lead" lead "" "$manager" "$instr" "$REPO" "$(slot_list "" "$DOMAINS")")"
+    echo "crew: lead tab 'crew $SLUG' ready: $lead, $manager (board pane bottom-left)"
+    return
+  fi
+
+  # Job persona: new tsk task from the instructions, then its team
+  local T title out
+  title=$(head -1 <<<"$instr" | cut -c1-80)
+  out=$(mutj '{"number":1,"outcome":"created"}' tsk add --title="$title" --notes="$instr" -p "$REPO" --json) \
+    || die "tsk add failed (see above)"
+  T="T$(jq -r '.number // empty' <<<"$out")"
+  [[ "$T" != T ]] || die "tsk add returned no task number: $out"
+  mut tsk status "$T" ready >/dev/null
+  echo "crew: created task $T"
+  if [[ -n "$DOMAINS" ]]; then
+    cmd_team "$team" "$T" --persona "$JOB=${DOMAINS// /+}" "$instr"
+  else
+    cmd_team "$team" "$T" "$instr"
+  fi
+}
+
+# cmd_team TEAM T# [--persona JOB=DOMAIN[+DOMAIN]]... [INSTR]: worktree, one tab, one pane per member, start + brief each agent
+cmd_team() {
+  local team=${1:?usage: team <team> <T#>} T=${2:?usage: team <team> <T#>} instr="" pmap="" e doms d
+  local members wt base cwd path rank job n mates dir i m
+  local names=() ranks=() jobs=() panes=()
+  shift 2
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --persona) [[ "${2:-}" == *=* ]] || die "--persona needs <job>=<domain>[+<domain>]"; pmap="$pmap $2"; shift 2 ;;
+      *) instr=$1; shift ;;
+    esac
+  done
+  [[ -f "$ROOT/teams/$team.conf" ]] || die "no team '$team'"
+  for e in $pmap; do
+    doms=${e#*=}
+    case " $(team_jobs "$team" | tr '\n' ' ')" in *" ${e%%=*} "*) ;; *) die "team '$team' has no job '${e%%=*}'. jobs: $(team_jobs "$team" | tr '\n' ' ')" ;; esac
+    for d in ${doms//+/ }; do check_domain "$d"; done
+  done
+  if [[ -n "${CREW_WS:-}" ]]; then WS=$CREW_WS; else target_ws; fi
+  members=$(conf "$team" members); wt=$(conf "$team" worktree)
+  [[ -n "$instr" ]] || instr=$(tsk list "$T" --json 2>/dev/null | jq -r '.[0].notes // ""' 2>/dev/null || true)
+  [[ -n "$instr" ]] || instr="(read the task: tsk list $T --json)"
+  cwd="$REPO"; path="$HOME/.herdr/worktrees/$SLUG/$T-$team"
+  case "$wt" in
+    new|from-pair)
+      if [[ -e "$path" ]]; then
+        # A retained worktree must still be registered to this repo and branch.
+        [[ "$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)" == "$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir)" &&
+           "$(git -C "$path" symbolic-ref --short HEAD)" == "crew/$T-$team" ]] || die "unexpected worktree at $path"
+      elif branch_exists "crew/$T-$team"; then
+        mut git -C "$REPO" worktree add "$path" "crew/$T-$team" >&2
+      else
+        base=HEAD
+        if [[ "$wt" == from-pair ]] && branch_exists "crew/$T-pair"; then base="crew/$T-pair"; fi
+        mut git -C "$REPO" worktree add -b "crew/$T-$team" "$path" "$base" >&2
+      fi
+      cwd="$path" ;;
+    pair-branch)  # read the pair's commit; --detach because the driver's worktree already holds the branch
+      branch_exists "crew/$T-pair" || die "no branch crew/$T-pair: run 'team pair $T' first"
+      # re-review reuses the worktree from the last round, moved to the pair's new commit
+      if [[ -e "$path" ]]; then mut git -C "$path" checkout --detach "crew/$T-pair" >&2
+      else mut git -C "$REPO" worktree add --detach "$path" "crew/$T-pair" >&2; fi
+      cwd="$path" ;;
+  esac
+
+  for m in $members; do
+    rank=${m%%@*}; job=""
+    if [[ "$m" == *@* ]]; then job=${m#*@}; fi
+    ranks+=("$rank"); jobs+=("$job"); names+=("$(agent_name "$T" "${job:-$rank}")")
+  done
+  # One pane per member, each created with its own env: first is the tab's root pane, the rest splits of it
+  for ((i = 0; i < ${#names[@]}; i++)); do
+    set_env "${names[$i]}" "$T"
+    if (( i == 0 )); then
+      panes+=("$(mutj '{"result":{"tab":{"tab_id":"w_dry:t9"},"root_pane":{"pane_id":"w_dry:p9"}}}' \
+        herdr tab create --workspace "$WS" --cwd "$cwd" --label "$T $team" --no-focus "${EV[@]}" \
+        | jq -r '.result.root_pane.pane_id')")
+    else
+      dir=down; if (( i == 1 )); then dir=right; fi
+      panes+=("$(mutj "{\"result\":{\"pane\":{\"pane_id\":\"w_dry:p$((i+10))\"}}}" \
+        herdr pane split "${panes[0]}" --direction "$dir" --cwd "$cwd" --no-focus "${EV[@]}" | jq -r '.result.pane.pane_id')")
+    fi
+  done
+  for ((i = 0; i < ${#names[@]}; i++)); do
+    n=${names[$i]}; mates=""
+    for m in "${names[@]}"; do [[ "$m" == "$n" ]] || mates="$mates $m"; done
+    start_agent "$n" "${ranks[$i]}" "${panes[$i]}" "$T" "$(brief "$n" "${ranks[$i]}" "$T" "$mates" "$instr" "$cwd" \
+      "$(slot_list "${jobs[$i]}" "$(pmap_for "${jobs[$i]}")")")" "${jobs[$i]}"
+  done
+  echo "crew: team $team for $T in tab '$T $team' (agents: ${names[*]})"
+}
+
+# cmd_say AGENT MSG: prompt it when idle or done. Otherwise wait at most 20s, then queue the message as a step
+# on its task. Never blocks for long, never exits non-zero because the recipient is busy.
+cmd_say() {
+  local to=$1 msg=$2 state task=""
+  state=$(status_of "$to"); state=${state:-unknown}
+  if [[ "$state" == idle || "$state" == done ]] || herdr agent wait "$to" --until idle --until done --timeout 20000 >/dev/null 2>&1; then
+    submit "$to" "[from $ME] $msg"
+    return 0
+  fi
+  # Recipient's task: the T# in its name (<slug>-t<n>-<job>), else none
+  if [[ "$to" =~ ^.*-t([0-9]+)- ]]; then task="T${BASH_REMATCH[1]}"; fi
+  if [[ -n "$task" ]]; then
+    mut tsk steps "$task" add "[msg from $ME to $to] $msg"
+    echo "crew: $to is $state, message queued on $task (it reads it from the task steps)"
+  else
+    echo "crew: $to is $state and has no task; message NOT delivered, send it again later" >&2
+  fi
+  return 0
+}
+
+cmd_mark() {
+  local T=$1 st=$2 note=$3
+  mut tsk status "$T" "$st"
+  mut tsk steps "$T" add "$note"
+  mut herdr pane report-metadata "${HERDR_PANE_ID:-none}" --source crew --title "$T $ME: $note"
+}
+
+# show_agent NAME: one line "name<TAB>state" when the agent exists
+show_agent() { local st; st=$(status_of "$1"); if [[ -n "$st" ]]; then printf '%s\t%s\n' "$1" "$st"; fi; }
+
+cmd_status() {
+  local rows n job name
+  # herdr agent list has no names, so probe the names the crew would use
+  rows=$(tsk list -p "$REPO" --json)
+  echo "$rows"
+  for name in "$SLUG-lead" "$SLUG-manager"; do show_agent "$name"; done
+  for n in $(jq -r '.[].number // empty' <<<"$rows"); do
+    for job in $(all_jobs); do show_agent "$(agent_name "T$n" "$job")"; done
+  done
+}
+
+cmd_close() {
+  local T=$1 TEAM=${2:-} label tabs tab d
+  label="$T ..."; [[ -z "$TEAM" ]] || label="$T $TEAM"
+  # TEAM: exact tab label "T# TEAM". No TEAM: every tab starting with "T# "
+  tabs=$(herdr tab list --workspace "${CREW_WS:-${HERDR_WORKSPACE_ID:?}}" \
+    | jq -r --arg p "$T " --arg x "$TEAM" --arg l "$label" '.result.tabs[]
+      | select(if $x == "" then ((.label // "") | startswith($p)) else (.label // "") == $l end) | .tab_id')
+  [[ -n "$tabs" ]] || die "no tab labelled '$label'"
+  for tab in $tabs; do mut herdr tab close "$tab"; done
+  echo "crew: closed $T tabs. Worktree kept. Remove only after you confirm:"
+  if [[ -n "$TEAM" ]]; then
+    d="$HOME/.herdr/worktrees/$SLUG/$T-$TEAM"
+    [[ -e "$d" ]] && echo "  git -C $REPO worktree remove $d"
+  else
+    for d in "$HOME/.herdr/worktrees/$SLUG/$T-"*; do
+      [[ -e "$d" ]] && echo "  git -C $REPO worktree remove $d"
+    done
+  fi
+  return 0
+}
+
+# field_of KEY COL TEXT: column COL (tab separated) of the TEXT line whose first column is KEY
+field_of() { awk -F'\t' -v k="$1" -v c="$2" '$1==k{print $c; exit}' <<<"$3"; }
+
+# cmd_watch: feed for the Lead's Monitor. Prints one line per change, never repeats unchanged state.
+# The first poll only sets the baseline, except tasks already blocked. CREW_WATCH_SECS sets the interval.
+# CREW_WATCH_ONCE=1 stops after two polls (tests).
+cmd_watch() {
+  local secs=${CREW_WATCH_SECS:-20} polls=0 first=1 raw done_raw key st title old name new job names n f
+  local tasks="" agents="" files="" p_tasks="" p_agents="" p_files=""
+  while :; do
+    # a failed read keeps the last snapshot, so a bad poll prints nothing
+    # the default list hides done tasks, so the done list is read too
+    if raw=$(tsk list -p "$REPO" --json 2>/dev/null) && done_raw=$(tsk list -p "$REPO" --done --json 2>/dev/null) && tasks=$(jq -rs 'add | .[] | "T\(.number)\t\(.status)\t\(.title)"' <<<"$raw"$'\n'"$done_raw" 2>/dev/null); then :; else tasks=$p_tasks; fi
+    # agents: lead, manager, and every job agent of every task (same names as cmd_status)
+    names="$SLUG-lead $SLUG-manager"
+    if [[ -n "$tasks" ]]; then
+      for key in $(cut -f1 <<<"$tasks"); do
+        for job in $(all_jobs); do names="$names $(agent_name "$key" "$job")"; done
+      done
+    fi
+    agents=""
+    for name in $names; do
+      st=$(status_of "$name")
+      [[ -z "$st" ]] || agents="$agents$name"$'\t'"$st"$'\n'
+    done
+    # handoff files: handoff-<agent>.md only; renamed copies (handoff-<agent>.<epoch>.md) have a dot
+    files=$(ls "$SDIR" 2>/dev/null | sed -n 's/^handoff-\(.*\)\.md$/\1/p' | grep -v '\.' || true)
+
+    while IFS=$'\t' read -r key st title; do
+      [[ -n "$key" ]] || continue
+      old=$(field_of "$key" 2 "$p_tasks")
+      if [[ "$first" == 1 && "$st" == blocked ]]; then echo "$key start -> blocked: $title"
+      elif [[ "$first" == 0 && "$st" != "$old" ]]; then echo "$key ${old:-new} -> $st: $title"; fi
+    done <<<"$tasks"
+    while IFS=$'\t' read -r key old title; do
+      [[ -n "$key" ]] || continue
+      if [[ "$first" == 0 && -z "$(field_of "$key" 2 "$tasks")" ]]; then echo "$key $old -> gone: $title"; fi
+    done <<<"$p_tasks"
+    while IFS=$'\t' read -r name new; do
+      [[ -n "$name" ]] || continue
+      old=$(field_of "$name" 2 "$p_agents")
+      if [[ "$first" == 0 && "$new" != "$old" && ( "$new" == blocked || "$new" == done ) ]]; then echo "$name $new"; fi
+    done <<<"$agents"
+    while IFS=$'\t' read -r name _; do
+      [[ -n "$name" ]] || continue
+      if [[ "$first" == 0 && -z "$(field_of "$name" 2 "$agents")" ]]; then echo "$name gone"; fi
+    done <<<"$p_agents"
+    if [[ "$first" == 0 ]]; then
+      for n in $files; do
+        if ! grep -qxF "$n" <<<"$p_files"; then echo "handoff $n $SDIR/handoff-$n.md"; fi
+      done
+    fi
+
+    p_tasks=$tasks; p_agents=$agents; p_files=$files; first=0
+    polls=$((polls + 1))
+    if [[ "${CREW_WATCH_ONCE:-}" == 1 ]] && (( polls >= 2 )); then return 0; fi
+    sleep "$secs"
+  done
+}
+
+# cmd_handoff "<status>" [< body]: saves the body from stdin as the handoff (or keeps the file already there),
+# records it on the task, and tells the agent that restarts this one: manager for workers, lead for manager, manager for lead.
+cmd_handoff() {
+  local status=${1:?usage: handoff "<status>" < handoff text} f="$SDIR/handoff-$ME.md" body="" to
+  [[ -t 0 ]] || body=$(cat)
+  if [[ -n "$body" ]]; then mkdir -p "$SDIR"; printf '%s\n' "$body" >"$f"; fi
+  [[ -f "$f" ]] || die "no handoff at $f. Pipe the handoff text on stdin."
+  [[ -z "${CREW_TASK:-}" ]] || mut tsk steps "$CREW_TASK" add "[handoff] $ME: $status"
+  if [[ "$ME" =~ -t[0-9]+- ]]; then to="$SLUG-manager"
+  elif [[ "$ME" == "$SLUG-manager" ]]; then to="$SLUG-lead"
+  else to="$SLUG-manager"; fi
+  cmd_say "$to" "$ME hit the context limit. Handoff: $f. Restart it: herdr-crew restart $ME"
+  echo "crew: handoff saved to $f"
+}
+
+# restart_one NAME: /exit the agent, wait for its pane to reach the shell, start it again from its saved meta and brief.
+# The brief gets a resume line when a handoff exists. The handoff is renamed after the new agent starts.
+restart_one() {
+  local name=$1 rank job pane task i ready="" pi handoff brief
+  [[ -f "$SDIR/$name.meta" && -f "$SDIR/$name.brief" ]] || die "no saved state for $name (start it with herdr-crew first)"
+  rank=$(sed -n 's/^rank=//p' "$SDIR/$name.meta"); job=$(sed -n 's/^job=//p' "$SDIR/$name.meta")
+  pane=$(sed -n 's/^pane=//p' "$SDIR/$name.meta"); task=$(sed -n 's/^task=//p' "$SDIR/$name.meta")
+  mut herdr agent prompt "$name" /exit >/dev/null || true
+  if [[ -z "${CREW_DRY_RUN:-}" ]]; then
+    for ((i = 0; i < 30; i++)); do
+      pi=$(herdr pane process-info --pane "$pane" 2>/dev/null || true)
+      if jq -e '.result.process_info | .foreground_process_group_id == .shell_pid' <<<"$pi" >/dev/null 2>&1; then ready=1; break; fi
+      sleep 1
+    done
+    [[ -n "$ready" ]] || die "$name pane $pane is still busy after 30s; try again later"
+  fi
+  handoff="$SDIR/handoff-$name.md"
+  brief=$(sed '/^Resume from your handoff: /d' "$SDIR/$name.brief")  # drop the resume line of an earlier restart
+  if [[ -f "$handoff" ]]; then brief="$brief"$'\n'"Resume from your handoff: $handoff. Read it first. The board and the handoff show work already done: do not redo it, and do not create tasks that already exist."; fi
+  start_agent "$name" "$rank" "$pane" "$task" "$brief" "$job"
+  if [[ -f "$handoff" ]]; then mv "$handoff" "$SDIR/handoff-$name.$(date +%s).md"; fi
+  echo "crew: restarted $name"
+}
+
+# cmd_restart AGENT|T#: restart one agent, or every saved agent of a task
+cmd_restart() {
+  local who=${1:?usage: restart <agent|T#>} m
+  if [[ "$who" =~ ^T[0-9]+$ ]]; then
+    for m in "$SDIR"/*.meta; do
+      [[ -e "$m" ]] || continue
+      if grep -qx "task=$who" "$m"; then restart_one "$(basename "$m" .meta)"; fi
+    done
+  else
+    restart_one "$who"
+  fi
+}
+
+sub=${1:-}; [[ $# -gt 0 ]] && shift
+case "$sub" in
+  launch)  cmd_launch "$@" ;;
+  team)    cmd_team "$@" ;;
+  say)     cmd_say "$@" ;;
+  mark)    cmd_mark "$@" ;;
+  status)  cmd_status ;;
+  close)   cmd_close "$@" ;;
+  watch)   cmd_watch ;;
+  handoff) cmd_handoff "$@" ;;
+  restart) cmd_restart "$@" ;;
+  *) die "usage: herdr-crew {launch <spec> - | team <team> <T#> [--persona <job>=<domain>[+<domain>]]... | say <agent> <msg> | mark <T#> <status> <note> | status | close <T#> [<team>] | watch | handoff \"<status>\" < handoff text | restart <agent|T#>}. spec: <rank>[@<persona>[+<persona>]] or a job persona (driver, navigator, ...)" ;;
+esac
