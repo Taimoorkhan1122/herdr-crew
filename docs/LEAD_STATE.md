@@ -1,18 +1,18 @@
 # Lead state and session checkpoint
 
-Updated: 2026-10-14 23:57 PKT.
+Updated: 2026-10-15 00:44 PKT.
 
 ## Objective and authorization
 
 Implement the approved runtime visual-planning workflow. The user explicitly approved in the main conversation after clarifying that earlier Lavish inputs were testing. That main-conversation approval is the authorization; simulated review input is not. Native execution with independent final review was used.
 
-Scope: planner persona/team, shared contract/template/example, Lead/Manager routing and versioned approval/revision/source checks, docs/ADR and regression fixtures. The separate five-finding maintainability plan is still unapproved. Live agents, installation, push, merge, publication and cleanup are not authorized.
+Scope: planner persona/team, shared contract/template/example, Lead/Manager routing and versioned approval/revision/source checks, docs/ADR and regression fixtures. The separate five-finding maintainability plan is still unapproved. The user subsequently requested commit and push in the main conversation. Commit and push of feat/visual-planning are authorized. Merge, live agents, installation, release publication and cleanup remain outside scope.
 
 ## Repository and changes
 
-- Main checkout tracks origin/main. Feature work is isolated at .superpowers/worktrees/visual-planning on feat/visual-planning, based on 879f9bb. Inspect `git log -1` there for the final local feature commit; this checkpoint is prepared immediately before that commit.
+- Main checkout tracks origin/main. Feature work is isolated at .superpowers/worktrees/visual-planning on feat/visual-planning, based on 879f9bb. Implementation commit: a643765. A documentation handoff commit records the authorized feature-branch push; inspect git log/status for its final hash.
 - User work on main and its index is preserved. Feature changes are in README.md, SKILL.md, ranks/crew-lead.md, ranks/crew-manager.md, test/dry-run.sh; new personas/planner.md, teams/plan.conf, docs/planning/, approved spec/plan and ADR 0017; feature/reference/state/history updates accompany them.
-- bin/crew, bin/ctx-guard and bin/install-skills remain byte-unchanged from baseline. No remote write occurred for this task.
+- bin/crew, bin/ctx-guard and bin/install-skills remain byte-unchanged from baseline. The current authorized action is a normal feature-branch push to origin; verify its remote hash before claiming completion.
 
 ## Completed and verified
 
@@ -24,9 +24,9 @@ Scope: planner persona/team, shared contract/template/example, Lead/Manager rout
 
 ## Work in hand and limits
 
-Implementation and review corrections complete; final local commit/handoff is the remaining bookkeeping step. No live crew resource was started. Live agent compliance, approval/revision behavior, offline fallback and restart continuity remain unverified; see docs/planning/acceptance.md. Existing restart race and the other audit findings remain separate.
+Implementation and review corrections are committed at a643765. Only the authorized handoff commit, normal feature-branch push and remote-hash verification remain for this turn. No live crew resource was started. Live agent compliance, approval/revision behavior, offline fallback and restart continuity remain unverified; see docs/planning/acceptance.md. Existing restart race and the other audit findings remain separate.
 
-The branch/worktree and ignored ledger .superpowers/sdd/2026-10-14-visual-planning/progress.md are retained. No cleanup is authorized. Do not mistake local completion for merge/publication or full live acceptance.
+The branch/worktree and ignored ledger .superpowers/sdd/2026-10-14-visual-planning/progress.md are retained. No cleanup is authorized. A verified branch push does not imply merge, release publication or full live acceptance.
 
 ## Decisions and failed attempts
 
@@ -39,4 +39,4 @@ The branch/worktree and ignored ledger .superpowers/sdd/2026-10-14-visual-planni
 
 1. Inspect feature `git status --short --branch` and `git log -1`; confirm final commit and that local review artifacts are absent from it.
 2. Read the contract/template/example and docs/planning/acceptance.md for the implemented interface and remaining evidence gaps.
-3. Await the user's next instruction. Keep merge/push, live fixtures, cleanup and separate maintenance implementation parked unless explicitly authorized.
+3. Verify the authorized push of feat/visual-planning against origin, then await the user's next instruction. Keep merge, release, live fixtures, cleanup and separate maintenance implementation parked.
