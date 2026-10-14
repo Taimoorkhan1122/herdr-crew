@@ -1,5 +1,7 @@
 # herdr-crew
 
+![HERDR-CREW workflow: Lead and Manager coordinate engineering, testing, API builds, and investigation through one shared task board.](docs/assets/herdr-crew-banner.png)
+
 herdr-crew starts a small team of Claude agents inside Herdr, a terminal program that splits one window into tabs and panes. One command, `/herdr-crew lead "<what you want>"`, starts a Lead agent that talks to you, a Manager agent that starts worker teams, and a task board. Development teams use separate Git worktrees. The investigation team reads the current repo without a new branch or worktree. Every agent shares one board, which is tsk, a small command-line task list.
 
 **Experimental:** automated launcher checks pass, but full live development acceptance is pending. See [known limitations](#known-limitations) and [verification status](docs/STATE.md).
