@@ -2,9 +2,11 @@
 
 These files record how herdr-crew got built, why it is built the way it is, and what state it is in now. Read them in this order when you come back to the project after a break.
 
+- `LEAD_STATE.md`: the active objective, work in hand, approvals, and exact session resume steps. Read it first when taking over work.
 - `STATE.md`: the current state. What works, what is only tested with dry runs, what is open, and what to do next. Start here.
 - `features.md`: the current feature, option, flow, and hook reference, checked against the executable scripts and rank/persona instructions.
 - `PROGRESS.md`: a dated log of each change session, newest first.
+- `maintainability-review-2026-10-14.md`: independent KISS review findings and proposed focused fixes; not implemented.
 - `adr/`: architecture decision records (ADRs). Each file records one decision, its context, and its consequences.
   - `adr/0000-template.md` is the template for new ADRs.
 
@@ -13,6 +15,8 @@ The top-level `README.md` explains how to use the crew. These docs explain how a
 `superpowers/plans/2026-10-14-project-qa.md` records the approved Q&A plan and execution limits. `research/test-concurrency.md` is a proposal, not a built feature. ADR bodies preserve historical decisions and can describe earlier behavior; use the README, feature reference, current scripts, and STATE for current behavior and acceptance.
 
 ## How to maintain these docs
+
+Follow `../AGENTS.md` for the checkpoint fields and update triggers. The coordinating agent maintains `LEAD_STATE.md` as work proceeds and before each handoff.
 
 - After each change session, add a dated line to the top of `PROGRESS.md`. Put the newest session first.
 - When the status of anything changes, update `STATE.md`. Move items between "What works", "Only dry-run tested", and "Open issues" as needed.

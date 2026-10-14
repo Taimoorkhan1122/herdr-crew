@@ -2,6 +2,10 @@
 
 Status as of 2026-10-14. Crew launch and project Q&A have live scratch-repo evidence; full development acceptance remains pending. Two live problems are open: the Haiku driver claimed it had no shell, and the Manager used an archived task number. Live test 3 (review and test teams) has not run. Verification is tracked per feature below; launch tests do not establish full lifecycle acceptance.
 
+## Source review (2026-10-14)
+
+Independent KISS review found one high-priority handoff-path race and four medium-priority issues: stale test branches, missing review-worktree ownership validation, failed agent reads reported as gone, and an undeclared required skill. These are source-review findings with no runtime fixes yet. See [the review](maintainability-review-2026-10-14.md) for locations, regression recommendations, and verification limits. Passing existing suites does not settle these gaps.
+
 ## Project Q&A (2026-10-14)
 
 - Added investigator and investigate, quick/deep routing, evidence-based answers, numbered follow-ups, and separate answer completion (ADR 0016). No launcher changes.
