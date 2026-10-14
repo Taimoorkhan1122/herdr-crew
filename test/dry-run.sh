@@ -422,5 +422,44 @@ if (( rc == 0 )); then
 fi
 reject "investigate: wrong rank refused before mutations" "is a inspector job" "check login" launch member@investigator -
 
+# 26. Planning launches one documentation worker and declares a separate approval gate.
+plan_request=$'Plan a safe restart fix.\nExplain failure before implementation.'
+for spec in planner member@planner; do
+  reset
+  rc=0; out=$(printf '%s\n' "$plan_request" | "$CREW" launch "$spec" - 2>&1) || rc=$?
+  (( rc == 0 )) && pass "plan $spec: launches" || flunk "plan $spec: rc=$rc ($out)"
+  if (( rc == 0 )); then
+    in_log "plan $spec: planning branch" "worktree add -b crew/T7-plan"
+    in_log "plan $spec: member rank" "--agent crew-member -n $S-t7-planner"
+    [[ $(cnt 'agent start') == 1 && $(cnt 'pane split') == 0 ]] && pass "plan $spec: one worker" || flunk "plan $spec: extra worker"
+    plan_brief=$(brief_of "$S-t7-planner")
+    in_out "plan $spec: original request" "$plan_request" "$plan_brief"
+    in_out "plan $spec: documentation scope" "Planning artifacts only" "$plan_brief"
+    in_out "plan $spec: contract pointer" "docs/planning/visual-plan-contract.md" "$plan_brief"
+    in_out "plan $spec: reports version" "plan ready:" "$plan_brief"
+    in_out "plan $spec: visual tooling" "lavish-axi" "$plan_brief"
+    panes_ok "plan $spec: environment"
+  fi
+done
+reset
+rc=0; out=$("$CREW" team plan T7 "$plan_request" 2>&1) || rc=$?
+(( rc == 0 )) && pass "plan team: existing task" || flunk "plan team: rc=$rc ($out)"
+[[ $(cnt 'tsk add') == 0 ]] && pass "plan team: no duplicate task" || flunk "plan team: duplicate task"
+reject "plan: wrong rank refused" "is a member job" "write plan" launch inspector@planner -
+lead_rules=$(cat "$(dirname "$CREW")/../ranks/crew-lead.md")
+manager_rules=$(cat "$(dirname "$CREW")/../ranks/crew-manager.md")
+in_out "planning rules: Lead dispatch" "Run T<n> (plan)" "$lead_rules"
+in_out "planning rules: approval evidence" "[plan approved]" "$lead_rules"
+in_out "planning rules: revisions reopen" "reopen the same planning task" "$lead_rules"
+in_out "planning rules: testing is not approval" "testing or simulation" "$lead_rules"
+in_out "planning rules: standalone review" "standalone planner stays at review" "$manager_rules"
+in_out "planning rules: draft completion" 'done "plan ready:' "$manager_rules"
+in_out "planning rules: no implicit implementation" "Draft completion never authorizes implementation" "$manager_rules"
+in_out "planning rules: handoff limitation" "known restart handoff-file race" "$lead_rules"
+planner_rules=$(cat "$(dirname "$CREW")/../personas/planner.md")
+in_out "planning source: checks live repo" 'git -C "$CREW_REPO" status --short' "$planner_rules"
+in_out "planning source: blocks stale draft" "source drift" "$planner_rules"
+in_out "planning source: checks before dispatch" "source drift" "$lead_rules"
+
 echo
 if (( fails == 0 )); then echo "ALL PASS"; else echo "$fails FAILED"; exit 1; fi

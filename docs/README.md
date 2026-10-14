@@ -4,6 +4,8 @@ These files record how herdr-crew got built, why it is built the way it is, and 
 
 - `LEAD_STATE.md`: the active objective, work in hand, approvals, and exact session resume steps. Read it first when taking over work.
 - `STATE.md`: the current state. What works, what is only tested with dry runs, what is open, and what to do next. Start here.
+- `planning/visual-plan-contract.md`: runtime visual-plan format, permission boundaries, versioned approval and recovery; includes a template and worked example.
+- `planning/acceptance.md`: automated evidence, visual checks and pending live planning acceptance.
 - `features.md`: the current feature, option, flow, and hook reference, checked against the executable scripts and rank/persona instructions.
 - `PROGRESS.md`: a dated log of each change session, newest first.
 - `maintainability-review-2026-10-14.md`: independent KISS review findings and proposed focused fixes; not implemented.
