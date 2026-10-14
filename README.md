@@ -103,6 +103,26 @@ Then this happens:
 
 Watch progress in four places: the board pane, the pane titles (such as `T7 <agent>: started`), the team tabs, and `herdr-crew status`.
 
+### Ask for a visual plan before implementation
+
+Tell the Lead what you want planned:
+
+```text
+/herdr-crew lead "Plan the checkout retry change. Show the flow and failure cases before implementing it."
+```
+
+The Lead sends a planning task to the Manager, which starts one `planner` in a separate worktree. The planner writes a Markdown plan with Mermaid source and a local visual review page. You see the goal, before/after, a small component/activity overview, optional sequence/state detail, and tasks with exact files, regressions and verification commands.
+
+The planner checks target source against its retained snapshot before drafting or revising. Relevant dirty changes or source drift block progress until you choose the source explicitly; nothing is reset or merged automatically. The Lead rechecks source before implementation dispatch.
+
+The Manager's `plan ready:` completion means the draft is available. The Lead presents it and asks you to approve its commit/hash and scope before implementation starts. Test/simulation feedback, annotations and completed drafting tasks do not authorize implementation. Approval stays in tsk; changing the canonical plan materially requires a new version and approval. If the browser is unavailable, review the Markdown instead.
+
+You can request revisions on the same planning task. The retained planning branch/worktree preserves versions and source evidence across sessions; the handoff records task, paths, commit/hash, approval, gaps and next action. The planning branch does not need to be merged just to read the approved plan. A small explicitly authorized fix or a source-only question keeps its existing route when planning is unnecessary.
+
+For an optional standalone draft, use `/herdr-crew planner "<what to plan>"` or `herdr-crew team plan T<n>` for an existing task. A standalone planner stays at `review` for manual acceptance. It does not create a Manager or authorize implementation. The target repository needs a commit for a planning worktree; an unborn repository is reported as a prerequisite instead of receiving an unsolicited initial commit.
+
+Read the [plan contract](docs/planning/visual-plan-contract.md), [template](docs/planning/visual-plan-template.md), [worked example](docs/planning/examples/handoff-plan.md), and [acceptance checklist](docs/planning/acceptance.md). The documentation-only worker scope is enforced by instructions and review, not a new filesystem sandbox. Local `.lavish/` output is kept out of commits even if the target does not ignore it. The existing restart handoff-file race remains unresolved; this feature does not establish live restart continuity.
+
 ### Talk to a running crew
 
 Run the same command again with new text:
@@ -263,6 +283,7 @@ Job personas have a `rank:` line and fill a team slot. Domain personas have no `
 | `code-reviewer` | job | inspector | code-review, ponytail-review | gh-axi | max | Reviews a branch against the repo's standards and the task |
 | `qa-bug-triager` | job | inspector | qa-bug-validator | gh-axi | none | Decides if a reported bug is real, by reading the source |
 | `investigator` | job | inspector | none | none | inherited | Answers project questions and traces flows with source evidence; writes answers to tsk |
+| `planner` | job | member | none | lavish-axi | inherited | Writes source-grounded visual plans only; reports draft version for user approval |
 | `pragmatic-senior` | domain (default) | any | karpathy-guidelines, ponytail | none | none | Makes the smallest change that solves the task |
 | `nestjs-expert` | domain | any | nestjs-best-practices, context7-mcp, supabase, supabase-postgres-best-practices | none | none | NestJS and Node backend work. Postgres or Supabase work loads the two Supabase skills first. |
 | `react-expert` | domain | any | react-production-engineering, react-component-engineering, react-quality-engineering, context7-mcp | chrome-devtools-axi | none | React and TypeScript work. Next.js repos also load vercel-react-best-practices. |
@@ -280,6 +301,7 @@ A team is a group of jobs plus a worktree rule. The files live in `teams/`.
 | `test` | tester (member) | New branch `crew/T#-test`, from `crew/T#-pair` if it exists, else from HEAD |
 | `bug-validate` | qa-bug-triager (inspector), qa-bug-reproducer (member) | New branch `crew/T#-bug-validate` in its own worktree |
 | `investigate` | investigator (inspector) | Current repo, no new branch or worktree |
+| `plan` | planner (member) | New or retained `crew/T#-plan`; documentation artifacts only |
 
 Worktrees live at `~/.herdr/worktrees/<slug>/T<n>-<team>`. The `<slug>` is the first six characters of the repo folder name, plus four hex characters from a hash of the repo path, so two repos with the same name stay apart. Agent names look like `<slug>-t<n>-<job>`, such as `my-app-3f9c-t7-driver`. The Lead is `<slug>-lead` and the Manager is `<slug>-manager`.
 
@@ -322,7 +344,7 @@ AXI (Agent eXperience Interface) is a set of command-line tools built for agents
 
 Each persona or rank declares the AXI tools it uses in an `axi:` line in its frontmatter. The tables above show the mapping:
 
-- The lead uses `gh-axi` and `lavish-axi`. The manager uses `quota-axi`.
+- The lead uses `gh-axi` and `lavish-axi`. The manager uses `quota-axi`. The planner uses `lavish-axi` for the review projection.
 - The driver and the code reviewers use `gh-axi`. The driver never pushes, merges, or creates PRs with it.
 - The tester and the react-expert use `chrome-devtools-axi`.
 
@@ -389,6 +411,8 @@ The test puts fake `herdr`, `tsk`, and `git` commands first on your PATH, and ch
 `test/worktrees.sh` uses real Git with fake Herdr/tsk and a disposable HOME. It checks branch attachment, retained edits, reuse, and ownership refusals. Neither suite establishes live agent behavior. [STATE.md](docs/STATE.md) separates automated checks from live acceptance and remaining gaps.
 
 ## Known limitations
+
+- Visual planning has automated launch/instruction checks and a browser-checked example. Live Lead/planner approval, revision, offline fallback and restart acceptance remain pending; see [the acceptance checklist](docs/planning/acceptance.md).
 
 - In a live test, the Haiku driver once said it had no shell, and the Manager once used an old, archived task number. Both are under investigation.
 - The launcher answers Claude's "trust this folder" prompt only for agents it starts in a new pane. Any other trust prompt is yours to answer.

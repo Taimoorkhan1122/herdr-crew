@@ -23,7 +23,7 @@ Spec forms are `lead`, `<rank>@<job>[+<domain>]`, or a bare job. `lead@<domain>`
 ## Configuration and identity
 
 - [ranks/](../ranks/) sets permissions, model, effort, and communication rules: Lead opus/high, Manager haiku/max, member haiku/high, inspector haiku/xhigh. Model aliases resolve through the native runtime.
-- [personas/](../personas/) defines seven jobs: driver, navigator, tester, code-reviewer, qa-bug-triager, qa-bug-reproducer, investigator. Five domains are pragmatic-senior, nestjs-expert, react-expert, ui-expert, security-paranoid. Default domain is pragmatic-senior.
+- [personas/](../personas/) defines eight jobs: driver, navigator, tester, code-reviewer, qa-bug-triager, qa-bug-reproducer, investigator, planner. Five domains are pragmatic-senior, nestjs-expert, react-expert, ui-expert, security-paranoid. Default domain is pragmatic-senior.
 - Persona `rank:` defines a job; domains omit it. Optional `skills:` and `axi:` are merged into the brief. A job's `effort:` overrides rank effort. A domain's effort does not set the launch effort.
 - A rank's `model: inherit` omits the model flag. `kind: opencode` selects the alternate backend and `opencode_model:` supplies its model. No current rank uses it; live compatibility is not established.
 - [teams/](../teams/) defines members and worktree modes. The first member gets the root pane; later members split from it. `launch lead` has a special Lead/Manager/board layout.
@@ -42,9 +42,18 @@ Spec forms are `lead`, `<rank>@<job>[+<domain>]`, or a bare job. `lead@<domain>`
 | Quick project Q&A | Lead delegates a read-only Explore helper at medium effort, requesting Haiku 5.5. The tested schema uses the haiku alias. Answers include original Q number, source/version evidence, flow, scope, and uncertainty. No task is required for a small lookup. |
 | Deep project Q&A (`investigate`) | Investigator in `worktree=none` reads the current repo. Saves numbered single-line answers, marks review with `answers ready:`, and reports to Manager. Manager checks coverage, marks done with `answered:`, and closes the tab. No development review or merge branch. |
 | Q&A follow-ups | Active questions append `[question Q<n>]` steps. Investigator and Manager recheck steps before completion. Fresh exploration after completion uses a linked new task and refreshed evidence. A supported clarification can use identified earlier evidence. |
+| Visual planning (`plan`) | One planner (member) writes plan Markdown/Mermaid and a local HTML/SVG projection in a new/retained crew/T#-plan worktree. Manager checks drafting coverage and reports plan ready; Lead records explicit versioned approval before development. Revisions reuse the task/worktree and retain approval history. No launcher subcommand or board state was added. |
 | Standalone jobs | Direct launch creates the task and team, but does not create a Manager. Job results at review require manual acceptance or an existing Manager. |
 
 Members use native edit permissions and session Bash denies for `git push`/`git merge`. Inspectors deny Edit/Write and have a restricted command list. Investigation further excludes test/build commands that may write. These are native tool permissions and instructions, not a separate operating-system sandbox.
+
+## Visual planning contract
+
+[Contract](planning/visual-plan-contract.md), [template](planning/visual-plan-template.md), [example](planning/examples/handoff-plan.md), and [acceptance checklist](planning/acceptance.md) define the draft format and review criteria. Canonical plans live in docs/superpowers/plans/ on their planning branches. One-line tsk evidence records source version, paths, commit/hash, checks/gaps, approval and linked work; HTML stays local and out of commits. A target may not ignore .lavish/, so the planner stages only exact Markdown paths and inspects the full index before committing.
+
+The Lead and Manager keep their existing permissions. The planner inherits the broad member tools but is instructed to write planning artifacts only; domain implementation steps do not expand that scope. Approval is a real explicit user decision, distinct from test/simulation feedback, annotations and task completion. Approval metadata is outside the hashed Markdown. Material revisions require renewed approval. Manager drafting completion bypasses development review/test teams. Without Manager/manual acceptance, a standalone draft stays at review.
+
+These are configured job/instruction contracts. Fake launch tests prove composition and declared routing, not agent compliance or live approval behavior. Browser fallback and known restart races remain explicit acceptance limits in STATE.
 
 ## Environment controls
 
@@ -95,4 +104,4 @@ It combines persona skills with all skill names in [skills.sources](../skills.so
 - [Test-concurrency research](research/test-concurrency.md): unimplemented proposal. No test-slot environment controls, `test`/`tests` subcommands, or semaphore are shipped.
 - [dry-run tests](../test/dry-run.sh): fake-tool launcher, prompt, hook, and restart checks. [worktree tests](../test/worktrees.sh): real-Git branch/worktree checks. Live answer evidence is recorded separately in STATE.
 
-This documentation audit changes documentation only. It does not extend runtime behavior or settle pending live acceptance.
+The feature inventory includes configured planning behavior; automated and live verification remain separately recorded in STATE.

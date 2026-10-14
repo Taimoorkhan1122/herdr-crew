@@ -2,6 +2,15 @@
 
 Status as of 2026-10-14. Crew launch and project Q&A have live scratch-repo evidence; full development acceptance remains pending. Two live problems are open: the Haiku driver claimed it had no shell, and the Manager used an archived task number. Live test 3 (review and test teams) has not run. Verification is tracked per feature below; launch tests do not establish full lifecycle acceptance.
 
+## Visual planning (2026-10-14)
+
+- Added a planner member job and plan team, with a shared contract/template and source-grounded diagram example. No bin/crew, ctx-guard or dependency-installer changes.
+- Lead/Manager instructions keep their existing permissions. Manager drafting completion is separate from real-user versioned approval. Revisions retain task/branch/history; material revisions require new approval. Testing/simulation input is not authorization. The documentation-only member scope is instruction/review policy, not a new filesystem sandbox.
+- Before drafting/revision and implementation dispatch, target source version/dirtiness is reconciled with the retained snapshot. Relevant drift blocks progress until an explicit source decision; no automatic reset/merge.
+- Regression evidence: 12 missing-feature assertions failed before implementation; 167 checks then passed. Independent review found one P2 source-drift gap; three added assertions failed before correction. Final hermetic suite: 170 checks, exit 0/ALL PASS. Four real-Git worktree checks and each of five shell syntax checks exited 0. Documentation links/whitespace checked separately.
+- Chrome parsed all three Mermaid blocks (template overview and example flow/sequence). The sample SVG page was inspected at 1200px desktop and 500px actual narrow viewport, in light/dark, with expanded details and keyboard focus; no horizontal overflow. The browser's minimum viewport was 500px despite a smaller resize request. Independent review confirmed SVG/Mermaid semantics and embedded example bytes match.
+- Independent review found no other blockers; its one source-drift finding was corrected through RED/GREEN contract checks. No live planner/Lead agents, installation, production changes, merge or push ran for this feature. Actual agent planning, approval/revision behavior, offline fallback and full handoff/restart remain live acceptance gaps in [the checklist](planning/acceptance.md). The separate five maintenance findings remain unresolved.
+
 ## Source review (2026-10-14)
 
 Independent KISS review found one high-priority handoff-path race and four medium-priority issues: stale test branches, missing review-worktree ownership validation, failed agent reads reported as gone, and an undeclared required skill. These are source-review findings with no runtime fixes yet. See [the review](maintainability-review-2026-10-14.md) for locations, regression recommendations, and verification limits. Passing existing suites does not settle these gaps.
@@ -28,7 +37,7 @@ Independent KISS review found one high-priority handoff-path race and four mediu
 
 ## Automated checks and partial live coverage
 
-- The hermetic test `test/dry-run.sh` runs 136 checks with fake `herdr`, `tsk`, and `git` shims. All pass under `/bin/bash` (bash 3.2). It covers launch, team, say, mark, status, close, the AXI brief lines, and the fixes below.
+- The hermetic test `test/dry-run.sh` runs 170 checks with fake `herdr`, `tsk`, and `git` shims. All pass under `/bin/bash` (bash 3.2). It covers launch, team, say, mark, status, close, the AXI brief lines, and the fixes below.
 - Autonomous task completion (ADR 0014). The manager runs pair, then review, then fix rounds (max 3), and marks `done` after the reviewer approves. `close <T#> <team>` closes one team tab, and a review re-run reuses its worktree. Dry-run checks cover the launcher and the prompt text only. The loop has not run live.
 - The Lead monitor (ADR 0015). `herdr-crew watch` polls the board every 20 seconds and prints one line per change. The Lead runs it with the Monitor tool. Dry-run checks cover task changes and unchanged-task silence. A board Monitor started during live Q&A; independent agent/handoff wake-up coverage remains pending.
 - The context budget (ADR 0015). `bin/ctx-guard` warns each agent once at 135K tokens, and the launcher registers it with `--settings`. `handoff` writes the handoff file, and `restart` starts the agent again from its saved brief. Dry-run checks cover the hook output, the once-per-session marker, the settings flag, the handoff and restart flow. Live threshold crossing and a full handoff/resume cycle remain unverified.

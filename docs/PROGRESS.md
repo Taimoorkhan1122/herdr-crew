@@ -2,7 +2,15 @@
 
 Newest entries first. Each entry gives the date and what changed.
 
+## 2026-10-15
+
+- User authorized committing and pushing the visual-planning feature branch. Implementation remains a643765; this documentation-only handoff update records the authorization and preserves live-acceptance limits. Push completion must be confirmed by exact remote branch hash; main and its separate local work are not part of this action.
+
 ## 2026-10-14
+
+- Implemented the approved runtime visual-planning workflow on feat/visual-planning: one planner member/team, contract/template/diagram example, separate Manager draft completion and Lead versioned approval, revision/source reconciliation, README/SKILL/reference and ADR 0017. No launcher/installer code changes. Feature regressions ran RED (12 missing contracts) then GREEN (167); independent review's P2 dirty/drift gap ran RED (3) then final GREEN (170 checks, exit 0). Four real-Git checks, each of five shell syntax checks, doc links and whitespace passed. Three Mermaid blocks parsed; SVG example inspected light/dark at desktop 1200px and actual narrow 500px, including details/focus and no overflow. Independent source review found no other blockers. Live agents, approval/revision/offline/restart acceptance, publication and merge remain pending/not run. The five maintenance findings were not implemented.
+
+- Visual-planning proposal: user selected the runtime Lead workflow. Saved the design and implementation plan; independent review corrections cover revision reopening, immutable approval metadata, portable local artifacts and current Git state. Proposal checks passed for links/formatting; no runtime implementation is complete. Lavish approved messages were mistakenly treated as execution authorization; user clarified they may be testing. Stopped, restored the only test-file edit, and kept the plan pending explicit main-conversation approval. No runtime/persona/team changes, commits, merge or push performed for this feature. An unused isolated feat/visual-planning worktree remains under .superpowers/worktrees/visual-planning; preserve it pending cleanup authorization.
 
 - Plan first: saved docs/superpowers/plans/2026-10-14-maintainability-fixes.md for five reviewed issues. Defines regression-first tasks, non-destructive stale-test refusal, shared worktree validation, conservative status failures, rank skill declarations, and final independent review. Reinspection confirmed install-skills already scans rank frontmatter; no installer rewrite is planned. Awaiting plan approval and execution method. No runtime/test implementation or test execution in this planning turn.
 

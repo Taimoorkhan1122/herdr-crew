@@ -1,6 +1,6 @@
 ---
 name: herdr-crew
-description: Launch an agent crew in Herdr for development or project questions. Usage - /herdr-crew <spec> <instructions>. Spec - lead (starts the crew), or <rank>[@<persona>[+<persona>]] with ranks member or inspector, or a bare job persona including investigator.
+description: Launch an agent crew in Herdr for development or project questions. Usage - /herdr-crew <spec> <instructions>. Spec - lead (starts the crew), or <rank>[@<persona>[+<persona>]] with ranks member or inspector, or a bare job persona including investigator or planner.
 allowed-tools: Bash(herdr-crew *)
 ---
 
@@ -24,7 +24,7 @@ Ranks (permissions, `ranks/`):
 - `member`: read-write in its own worktree, commits on its branch, never pushes.
 - `inspector`: read-only. Investigates, reviews, navigates, triages, tests.
 
-Job personas (`personas/`, have `rank:`): driver, tester, qa-bug-reproducer (member); navigator, code-reviewer, qa-bug-triager, investigator (inspector). A job sets the team slot and its skills.
+Job personas (`personas/`, have `rank:`): driver, tester, qa-bug-reproducer, planner (member); navigator, code-reviewer, qa-bug-triager, investigator (inspector). A job sets the team slot and its skills.
 
 Domain personas (`personas/`, no `rank:`, stackable on any job): pragmatic-senior (default when none given), nestjs-expert, react-expert, ui-expert, security-paranoid.
 
@@ -43,8 +43,11 @@ Teams (`teams/`), chosen from the job:
 - review: code-reviewer. Detached checkout of `crew/T#-pair`, so run pair first. A review spec on a new task is refused before anything starts.
 - test: tester. New branch `crew/T#-test` from `crew/T#-pair` if it exists, else HEAD.
 - investigate: investigator. Reads the current repo without a new branch or worktree. Saves answers in tsk.
+- plan: planner. Own worktree and planning branch. Writes Markdown/Mermaid plus an uncommitted local review page; product files stay unchanged.
 
-The manager runs pair -> review -> fix rounds (max 3) -> done on its own; the user merges.
+For requested visual planning, Lead sends `Run T<n> (plan)` through Manager. Read the installed `docs/planning/visual-plan-contract.md` and template. Manager's `plan ready:`/done result completes drafting only. Lead presents the page or Markdown, records explicit user approval against commit/hash and scope in tsk, then dispatches implementation. Test/simulation feedback is not authorization. Revisions reopen the same planning task and retain version/approval history; material revisions need new approval. A standalone planner stays at review for manual acceptance. Lead/Manager remain without file-writing tools.
+
+The manager runs pair -> review -> fix rounds (max 3) -> done on its own for authorized development; the user merges.
 
 For project questions, send one question or a numbered batch to the Lead. Quick lookups use a read-only Explore helper with `model: haiku` (expected resolution: Haiku 5.5, `claude-haiku-5-5`) and `effort: medium`. Deeper questions go through the Manager to `investigate`. Answers include source citations, inspected source version, and verification gaps. The Manager checks answer coverage and marks done without the development review loop.
 
@@ -55,6 +58,7 @@ Examples:
 - `herdr-crew launch driver -` creates a task and runs the pair team.
 - `herdr-crew launch member@driver+nestjs-expert -` same, with the NestJS persona on the driver.
 - `herdr-crew launch investigator -` creates a read-only project investigation task.
+- `herdr-crew launch planner -` creates a documentation-only visual planning task; it does not authorize implementation.
 
 The manager can add domain personas to a team slot: `herdr-crew team pair T2 --persona navigator=security-paranoid`.
 
