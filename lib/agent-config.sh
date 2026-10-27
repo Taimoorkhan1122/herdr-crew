@@ -43,7 +43,8 @@ config_validate() {
         (if has("effort") then
           if .agent == "claude" then
             (.effort as $e | ["inherit","low","medium","high","xhigh","max"]|index($e)) != null
-          else (.effort | text and (contains("#")|not)) end
+          else if .effort == "inherit" then (.effort | text and (contains("#")|not))
+          else (.effort | text and (contains("#")|not)) and has("model") and (.model != "inherit") end end
          else true end))))
   ' <<<"$1" >/dev/null 2>&1 || die "invalid agent configuration in $CONFIG_FILE (version 1; known roles; agent claude/opencode; optional model and effort; OpenCode model must be provider/model, with its variant in effort). Run: herdr-crew configure --help"
 }
