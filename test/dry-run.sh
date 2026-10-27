@@ -496,6 +496,10 @@ for probe in "--help" "help" "help team" "launch --help" "configure --help"; do
 done
 rc=0; out=$(env PATH="$NORUN" "$CREW" --version 2>&1) || rc=$?
 (( rc == 0 )) && [[ -n "$out" ]] && pass "no-runtime: --version works ($out)" || flunk "no-runtime: --version rc=$rc, $out"
+for shell in bash zsh; do
+  rc=0; out=$(env PATH="$NORUN" "$CREW" completion "$shell" 2>&1) || rc=$?
+  (( rc == 0 )) && in_out "no-runtime: completion $shell prints the script" "herdr-crew" "$out" || flunk "no-runtime: completion $shell rc=$rc, $out"
+done
 # a command that is not pure text still reports the missing runtime
 rc=0; out=$(env PATH="$NORUN" "$CREW" status 2>&1) || rc=$?
 (( rc != 0 )) && in_out "no-runtime: status still reports the missing jq" "jq not found" "$out" || flunk "no-runtime: status rc=$rc, $out"

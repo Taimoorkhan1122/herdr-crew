@@ -613,6 +613,8 @@ case "$sub" in
   help) [[ $# -gt 0 ]] && show_help "$1" || usage; exit 0 ;;
 esac
 if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then show_help "$sub"; exit 0; fi
+# completion prints a static script, so it needs no runtime either.
+[[ "$sub" == completion ]] && { cmd_completion "$@"; exit 0; }
 command -v jq >/dev/null || die "jq not found on PATH (install: brew install jq)"
 if [[ "$sub" == configure ]]; then cmd_configure "$@"; exit; fi
 for c in tsk herdr; do command -v "$c" >/dev/null || die "$c not found on PATH (tsk: brew install smarzban/tap/tsk; herdr: install Herdr first)"; done
@@ -629,6 +631,5 @@ case "$sub" in
   watch)   cmd_watch "$@" ;;
   handoff) cmd_handoff "$@" ;;
   restart) cmd_restart "$@" ;;
-  completion) cmd_completion "$@" ;;
   *) usage >&2; die "unknown command '$sub'. Run: herdr-crew help" ;;
 esac
