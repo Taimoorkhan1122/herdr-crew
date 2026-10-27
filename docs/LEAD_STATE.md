@@ -1,17 +1,16 @@
 # Lead state and session checkpoint
 
-## Active checkpoint: PR #2 Git permission review
+## Active checkpoint: OpenCode model/effort picker publication
 
-Updated: 2026-10-27 12:20 PKT (Asia/Karachi).
+Updated: 2026-10-27 13:18 PKT (Asia/Karachi).
 
-- Objective/approval: user requested validation first, then sub-agent fixes for PR Lens Git deny finding at d673e65. Prior normal PR-branch push authorization remains active; no merge, installation, cleanup or live acceptance authorized.
-- Repository: feat/project-agent-config in .superpowers/worktrees/agent-config; HEAD d091b5f8badcf0cf9c8e4314b94d601c31603874 before follow-up commit. PR #2: https://github.com/Taimoorkhan1122/herdr-crew/pull/2. Edits: lib/agent-config.sh, test/agent-config.sh and checkpoint/state/progress docs. Preserve main's four existing unstaged files and empty index.
-- Validation: sub-agent pr_lens_git_policy confirmed git -C forms miss current literal-prefix rules. Bare-command claim rejected: OpenCode documents trailing space-star also matches the command without arguments. Official source: https://opencode.ai/v2/docs/permissions/#matching.
-- Fix: retain direct push/merge denies; add two explicit git -C push/merge wildcard denies after broad shell allow. Regression evaluates generated last-match policy, covering ten denied forms (including quoted paths) and seven allowed controls. No new dependencies or Claude policy changes.
-- Evidence: new regressions failed for six -C forms before fix (exit1); focused58 then pass (exit0), independently rerun by parent. Launcher170, real-Git4, seven individual Bash syntax checks and whitespace pass (exit0). Native OpenCode enforcement was not executed; fixture models documented matching only. Local version query hit filesystem EPERM opening user log; no elevation/retry or model call needed.
-- Work in hand: sub-agent complete; parent owns final commit/normal push and exact remote verification. Canonical list pr2-git-policy. Final publication receipt belongs in main checkpoint and ignored feature ledger. No live resources.
-- Limits: targeted shell patterns are native tool policy, not a universal shell sandbox; arbitrary wrappers/aliases remain outside this fix. Live policy/lifecycle/model acceptance and historical handoff race remain parked.
-- Next: inspect diff/status, commit named fix/docs and push feat/project-agent-config normally, then verify remote hash and PR identity. Preserve worktree; await explicit merge/live-acceptance instructions.
+- Objective/authorization: user requested interactive OpenCode model and supported-effort selection after the wizard rejected high. Implementation and independent review complete; user explicitly authorized Push PR. Preparing normal feature-branch publication. Merge, installation, model generation and cleanup remain unperformed/unauthorized.
+- Repository: feat/opencode-model-picker in .superpowers/worktrees/opencode-model-picker, based on main57400a4386ce3d8607bf50a57cb7961119263e7a. Ten scoped files: README.md, SKILL.md, lib/agent-config.sh, test/agent-config.sh, docs/features.md, ADR0018 status/new0019, STATE/PROGRESS/this checkpoint. Main's existing edits and visual-planning docs are preserved separately. No staged work inherited.
+- Behavior: project-scoped OpenCode catalog via private metadata API; numbered/exact/search model picker and supported variants; no-variant/default handling; EOF/failure preserves saved config. Explicit efforts validate against the model catalog. Store existing model/effort fields, encode #variant on crew agent only; root model remains base. Model changes clear incompatible inherited variants; saved selection/environment pins restart.
+- Prior evidence: focused66/launcher170/Git4 checks exit0 (240 total), seven syntax and docs/whitespace checks passed. Installed2.1.2 catalog, native config parser and disposable wizard confirmed exact DeepSeek/high without generation/session. Fresh worktree verification: focused66, launcher170 and Git4 exit0 (240 total); seven syntax, affected links and whitespace exit0. Independent review's one P2 inheritance issue gained a failing regression, fixed/rechecked across four cases; no other source findings. Minor README clarification applied.
+- Work in hand: parent owns final verification, commit, normal push and PR creation; canonical opencode-picker-publication list. Feature ledger .superpowers/sdd/opencode-model-picker/progress.md stores receipt. Main retains an uncommitted source copy; PATH installed skill is separate and unchanged. No active agent/model sessions started.
+- Limits: no generation/billing/authentication acceptance or full native policy/lifecycle run. OpenCode hooks/Monitor/additional runtime adapters and historical handoff race remain parked. No new dependency.
+- Next: run syntax/config/launcher/worktree checks here, inspect scoped diff and commit; push feat/opencode-model-picker, open PR against main and verify remote equality. Keep all worktrees and main edits; record final receipt in main checkpoint and ignored feature ledger.
 
 ## Historical checkpoint retained below
 

@@ -13,7 +13,7 @@ git -C "$PROJECT" -c user.name=Fixture -c user.email=fixture@example.invalid com
 git -C "$TEMP_ROOT/other" init -q
 # Runtime calls are forbidden during configure, even if these binaries are installed.
 export LOG="$TEMP_ROOT/runtime.log"
-for tool in herdr tsk; do
+for tool in herdr tsk claude; do
   cat >"$TEMP_ROOT/fake/$tool" <<'SH'
 #!/usr/bin/env bash
 echo "$*" >>"$LOG"
@@ -21,6 +21,23 @@ exit 99
 SH
   chmod +x "$TEMP_ROOT/fake/$tool"
 done
+export CATALOG_FILE="$TEMP_ROOT/catalog.json"
+cat >"$CATALOG_FILE" <<'JSON'
+{"location":{},"data":[
+  {"providerID":"opencode","id":"deepseek-v4.1-flash-free","enabled":true,"variants":[{"id":"low"},{"id":"high"},{"id":"max"}]},
+  {"providerID":"local","id":"plain","enabled":true,"variants":[]},
+  {"providerID":"provider","id":"model","enabled":true,"variants":[{"id":"high"}]},
+  {"providerID":"local","id":"disabled","enabled":false,"variants":[]}
+]}
+JSON
+cat >"$TEMP_ROOT/fake/opencode" <<'SH'
+#!/usr/bin/env bash
+if [[ "$*" == 'api --standalone model.list' ]]; then
+  [[ -z "${CREW_TEST_CATALOG_ERROR:-}" ]] || exit 1
+  cat "$CATALOG_FILE"
+else exit 99; fi
+SH
+chmod +x "$TEMP_ROOT/fake/opencode"
 export PATH="$TEMP_ROOT/fake:$PATH"
 cd "$PROJECT"
 fails=0
@@ -109,7 +126,7 @@ wizard-model
 high
 n
 INPUT
-expect 'wizard saves an explicitly entered role and model' '[[ $rc == 0 ]] && jq -e '\''.roles.planner.model == "wizard-model"'\'' .herdr-crew.json >/dev/null'
+expect 'wizard saves an explicitly entered role, model and Claude effort' '[[ $rc == 0 ]] && jq -e '\''.roles.planner.model == "wizard-model" and .roles.planner.effort == "high"'\'' .herdr-crew.json >/dev/null'
 cp .herdr-crew.json "$TEMP_ROOT/before-wizard"
 run --interactive <<'INPUT'
 lead
@@ -119,6 +136,52 @@ high
 y
 INPUT
 expect 'wizard cancels all pending edits on a later EOF' '[[ $rc != 0 ]] && cmp -s .herdr-crew.json "$TEMP_ROOT/before-wizard"'
+run member opencode --model opencode/deepseek-v4.1-flash-free --effort high
+expect 'OpenCode saves a supported model-specific effort' '[[ $rc == 0 ]] && jq -e '\''.roles.member.effort == "high"'\'' .herdr-crew.json >/dev/null'
+cp .herdr-crew.json "$TEMP_ROOT/before-variant"
+run member opencode --model opencode/deepseek-v4.1-flash-free --effort medium
+expect 'unsupported model effort reports supported choices without saving' '[[ $rc != 0 && "$out" == *"low"* && "$out" == *"high"* && "$out" == *"max"* ]] && cmp -s .herdr-crew.json "$TEMP_ROOT/before-variant"'
+run member opencode --effort high
+expect 'OpenCode effort requires an explicit model' '[[ $rc != 0 && "$out" == *"model"* ]] && cmp -s .herdr-crew.json "$TEMP_ROOT/before-variant"'
+run --interactive <<'INPUT'
+lead
+claude
+opus
+high
+y
+member
+opencode
+deepseek
+1
+2
+n
+INPUT
+expect 'wizard searches models and offers selected model efforts after a Claude role' '[[ $rc == 0 ]] && jq -e '\''.roles.lead.effort == "high" and .roles.member == {agent:"opencode",model:"opencode/deepseek-v4.1-flash-free",effort:"high"}'\'' .herdr-crew.json >/dev/null'
+run --interactive <<'INPUT'
+member
+opencode
+local/plain
+n
+INPUT
+expect 'wizard skips effort selection for a model without variants' '[[ $rc == 0 ]] && jq -e '\''.roles.member == {agent:"opencode",model:"local/plain",effort:"inherit"}'\'' .herdr-crew.json >/dev/null'
+cp .herdr-crew.json "$TEMP_ROOT/before-variant"
+CREW_TEST_CATALOG_ERROR=1 run --interactive <<'INPUT'
+member
+opencode
+INPUT
+expect 'catalog failure cancels setup without changing saved assignments' '[[ $rc != 0 && "$out" == *"catalog"* ]] && cmp -s .herdr-crew.json "$TEMP_ROOT/before-variant"'
+run --interactive <<'INPUT'
+member
+opencode
+local/disabled
+INPUT
+expect 'wizard refuses disabled catalog models and cancels on EOF' '[[ $rc != 0 ]] && cmp -s .herdr-crew.json "$TEMP_ROOT/before-variant"'
+
+run member opencode --model opencode/deepseek-v4.1-flash-free --effort high
+run driver opencode --model local/plain
+run --show
+driver_row=$(printf '%s\n' "$out" | awk -F '\t' '$1 == "driver" {print $3, $4}')
+expect 'changing OpenCode model clears variants inherited from another model' '[[ $rc == 0 && "$driver_row" == "local/plain default" ]]'
 
 # Runtime adapter tests: capture each argument exactly, not shell-flattened text.
 rm .herdr-crew.json
@@ -158,6 +221,7 @@ for tool in claude opencode; do
   cat >"$TEMP_ROOT/fake/$tool" <<'SH'
 #!/usr/bin/env bash
 case "$1" in
+  api) [[ "$*" == "api --standalone model.list" ]] || exit 99; cat "$CATALOG_FILE" ;;
   --version) echo 2.1.2 ;;
   --help) echo --standalone ;;
   *) exit 99 ;;
@@ -169,13 +233,13 @@ export HERDR_ENV=1 CREW_WS=w1 CREW_SLUG=config-fixture CREW_REPO="$PROJECT"
 export PANE_ENV_DIR="$TEMP_ROOT/panes"
 mkdir -p "$PANE_ENV_DIR"
 launch() { rc=0; out=$("$CREW" "$@" 2>&1) || rc=$?; }
-run driver opencode --model provider/model
+run driver opencode --model provider/model --effort high
 : >"$LOG"
 launch team pair T7 'mixed team'
 expect 'mixed team launches configured driver with standalone OpenCode' '[[ $rc == 0 ]] && jq -se '\''any(.[]; .[0:3] == ["agent","start","config-fixture-t7-driver"] and (index("opencode") != null) and (index("--standalone") != null))'\'' "$LOG" >/dev/null'
 expect 'unconfigured navigator keeps Claude native rank settings' 'jq -se '\''any(.[]; .[0:3] == ["agent","start","config-fixture-t7-navigator"] and (index("crew-inspector") != null) and (index("--settings") != null))'\'' "$LOG" >/dev/null'
 policy=$(jq -rs '[.[][] | select(type == "string") | select(startswith("OPENCODE_CONFIG_CONTENT=")) | sub("^OPENCODE_CONFIG_CONTENT=";"") | fromjson][0] // {}' "$LOG")
-expect 'OpenCode receives provider model and member native edit permission' 'jq -e '\''.model == "provider/model" and (.agents.crew.permissions|length > 0) and any(.agents.crew.permissions[]?; .action == "edit" and .effect == "allow")'\'' <<<"$policy" >/dev/null'
+expect 'OpenCode receives provider model and member native edit permission' 'jq -e '\''.model == "provider/model" and .agents.crew.model == "provider/model#high" and (.agents.crew.permissions|length > 0) and any(.agents.crew.permissions[]?; .action == "edit" and .effect == "allow")'\'' <<<"$policy" >/dev/null'
 # Model the documented whole-value wildcards, trailing " *" bare-command match,
 # and last-match precedence: https://opencode.ai/v2/docs/permissions/#matching
 shell_effect() {
@@ -200,7 +264,7 @@ run driver claude --model changed
 launch restart config-fixture-t7-driver
 expect 'restart pins original provider and model across config edits' '[[ $rc == 0 ]] && jq -se '\''any(.[]; .[0:3] == ["agent","start","config-fixture-t7-driver"] and (index("opencode") != null))'\'' "$LOG" >/dev/null'
 policy=$(jq -cs '[.[]|select(.[0] == "effective-policy" and .[1] == "config-fixture-t7-driver")|.[2]][0] // {}' "$LOG")
-expect 'restart restores original provider model' 'jq -e '\''.model == "provider/model"'\'' <<<"$policy" >/dev/null'
+expect 'restart restores original provider model and effort variant' 'jq -e '\''.model == "provider/model" and .agents.crew.model == "provider/model#high"'\'' <<<"$policy" >/dev/null'
 run inspector opencode --model provider/reviewer
 : >"$LOG"
 launch team investigate T8 'read only'
@@ -230,5 +294,14 @@ printf '%s\n' '{"version":1,"roles":{"driver":{"agent":"bogus"}}}' >.herdr-crew.
 : >"$LOG"
 launch launch driver 'reject bad config'
 expect 'bad project config is rejected before tsk task creation' '[[ $rc != 0 && "$out" == *".herdr-crew.json"* && ! -s "$LOG" ]]'
+printf '%s\n' '{"version":1,"roles":{"member":{"agent":"opencode","effort":"high"}}}' >.herdr-crew.json
+: >"$LOG"
+out=$("$CREW" configure --show 2>&1) || rc=$?
+expect 'OpenCode effort without model is rejected without rewriting config' '[[ $rc != 0 && "$out" == *".herdr-crew.json"* ]]'
+printf '%s\n' '{"version":1,"roles":{"member":{"agent":"opencode","model":"opencode/deepseek-v4.1-flash-free","effort":"high"}}}' >.herdr-crew.json
+: >"$LOG"
+out=$("$CREW" configure --show 2>&1) || rc=$?
+expect 'OpenCode effort with explicit model validates' '[[ $rc == 0 ]]'
+rm .herdr-crew.json
 (( fails == 0 )) || { echo "$fails checks failed"; exit 1; }
 echo 'ALL PASS'

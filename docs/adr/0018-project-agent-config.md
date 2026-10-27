@@ -1,6 +1,6 @@
 # 0018. Project agent assignments and native launch adapters
 
-- Status: Accepted
+- Status: Superseded in part by 0019 (OpenCode model and effort selection)
 - Date: 2026-10-27
 
 ## Context

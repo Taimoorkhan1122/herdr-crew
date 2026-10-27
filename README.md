@@ -93,11 +93,11 @@ Run the setup in your project directory:
 herdr-crew configure
 ```
 
-It lists installed supported CLIs and asks for a role, agent, optional model and optional effort. Choose `all` to set the four rank defaults, then add individual job overrides. Existing job overrides remain in place. The wizard saves once at the end; EOF cancels its pending changes. For scripts or direct changes:
+It lists installed supported CLIs and asks for a role and agent. For OpenCode it reads the project's available model catalog: choose a number, enter a full model ID, or type a search term, then choose one of that model's effort variants. Blank or `0` keeps the runtime default; models without variants skip the effort question. Claude keeps its model/effort prompts. Choose `all` to set the four rank defaults, then add individual job overrides. Existing job overrides remain in place. The wizard saves once at the end; EOF cancels its pending changes. For scripts or direct changes:
 
 ```bash
 herdr-crew configure all claude
-herdr-crew configure driver opencode --model provider/model
+herdr-crew configure driver opencode --model provider/model --effort high
 herdr-crew configure code-reviewer claude --model inherit --effort high
 herdr-crew configure --show
 ```
@@ -116,7 +116,7 @@ Settings live in `.herdr-crew.json` in the primary project checkout. Each projec
 }
 ```
 
-Valid keys are `lead`, `manager`, `member`, `inspector`, and the job personas below. Job settings override their rank; project settings override the bundled defaults. Changing agent clears inherited model/effort values from the previous runtime. With the same agent, omitted model/effort retains the inherited setting; `inherit` explicitly uses that agent's own default. Separate `effort` is supported only for Claude. OpenCode model variants (`#variant`) are not accepted yet. Deleting a role entry restores inheritance. Without a config file, the existing Claude defaults apply. There are no user-wide overrides.
+Valid keys are `lead`, `manager`, `member`, `inspector`, and the job personas below. Job settings override their rank; project settings override the bundled defaults. Changing agent clears inherited model/effort values from the previous runtime. With the same agent, omitted model/effort retains the inherited setting; changing an OpenCode model clears its inherited variant because variants belong to that model; `inherit` explicitly uses that agent's own default. For OpenCode, `--effort` selects a catalog variant of the explicit `--model`; supported names vary by model, so an unsupported choice fails without saving. Keep the variant in `effort`, rather than embedding `#variant` in the model field. The adapter writes the native `#variant` only on the crew agent selection, because OpenCode's root model default drops variants. The wizard and explicit OpenCode efforts query `opencode api --standalone model.list` in the primary checkout; this uses a private metadata server, creates no agent session and submits no model prompt. Catalog errors cancel setup without writing pending changes. Deleting a role entry restores inheritance. Without a config file, the existing Claude defaults apply. There are no user-wide overrides.
 
 Selection changes apply to new launches. Restart keeps the saved agent/model/effort in the same pane; it does not migrate a running session to another agent. Configure and `--show` need no Herdr server or tsk. Launch preflight checks the selected executables and OpenCode major version before creating tasks, worktrees or panes.
 
