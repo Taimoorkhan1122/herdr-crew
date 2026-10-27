@@ -81,6 +81,7 @@ case "$*" in
   *) exec "$REAL_GIT" "$@" ;;
 esac
 SH
+printf '#!/usr/bin/env bash\nexit 0\n' >"$FAKE/claude"
 chmod +x "$FAKE"/*
 export PATH="$FAKE:$PATH" HOME="$TMP/home" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 CREW_WS=w1
 unset CREW_SLUG CREW_REPO CREW_AGENT CREW_TASK CREW_MANAGER CREW_DRY_RUN BRANCH_EXISTS

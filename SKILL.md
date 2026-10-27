@@ -4,6 +4,8 @@ description: Launch an agent crew in Herdr for development or project questions.
 allowed-tools: Bash(herdr-crew *)
 ---
 
+When asked to configure the project's agents, run `herdr-crew configure --show` first, then use `herdr-crew configure <rank-or-job> <claude|opencode> [--model MODEL] [--effort EFFORT]` with the user's requested assignments. `all` sets rank defaults while preserving job overrides. The human wizard is `herdr-crew configure`; agents use arguments instead of an interactive prompt. Settings are in the main project's `.herdr-crew.json`, shared across its worktrees. Unsupported agents fail explicitly. OpenCode requires version 2 and has no separate effort or model-variant setting. Existing sessions retain saved selections on restart.
+
 Run the launcher. Pass the instructions on stdin so quoting never breaks:
 
 ```bash
@@ -68,7 +70,7 @@ Then relay the command output to the user in one or two lines (tab label, agents
 
 Other commands: `herdr-crew status`, `herdr-crew close <T#> [<team>]` (closes the tab only, prints the worktree removal command, never removes it), `herdr-crew watch` (the lead runs it in Monitor: one line per board change), `herdr-crew handoff "<status>" < body` (an agent saves its handoff when it nears the context budget), `herdr-crew restart <agent|T#>` (starts an agent again from its handoff).
 
-Context budget: each agent gets a hook at 135000 tokens. It writes a handoff, and its initiator restarts it.
+Context budget: Claude agents get a hook at 135000 tokens. OpenCode has no automatic crew context warning or asynchronous Monitor tool; its runtime brief specifies direct lookups, portable skills and bounded waits with explicit monitoring limits. Subagents are disabled under its native rank policy. Agents write a handoff before compaction; their initiator restarts them.
 
 If the output says "not inside Herdr", tell the user to start Herdr and rerun there.
 

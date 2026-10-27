@@ -11,7 +11,7 @@ mut() { if [[ -n "${CREW_DRY_RUN:-}" ]]; then echo "+ $*" >&2; else "$@"; fi; }
 # mutj FAKE_JSON CMD...: mutating command whose JSON stdout is needed
 mutj() { local fake=$1; shift; if [[ -n "${CREW_DRY_RUN:-}" ]]; then echo "+ $*" >&2; echo "$fake"; else "$@"; fi; }
 
-for c in tsk jq herdr; do command -v "$c" >/dev/null || die "$c not found (tsk: brew install smarzban/tap/tsk)"; done
+command -v jq >/dev/null || die "jq not found"
 
 # Repo and slug. Slug = 6 chars of the basename + 4 hex of the repo path, so same-named repos differ.
 # Panes crew creates carry CREW_* so worktree subshells keep the main repo's identity.
@@ -83,7 +83,14 @@ parse_spec() {
 agent_name() { echo "$SLUG-$(echo "$1" | tr '[:upper:]' '[:lower:]')-$2" | cut -c1-32; }
 # set_env NAME TASK: fills EV with the CREW_* --env args for the agent that will own the next pane.
 # herdr pane split does not inherit tab env, so every pane gets its own.
-set_env() { EV=(--env "CREW_SLUG=$SLUG" --env "CREW_TASK=$2" --env "CREW_AGENT=$1" --env "CREW_MANAGER=$SLUG-manager" --env "CREW_REPO=$REPO" --env "CREW_WS=${WS:-${CREW_WS:-${HERDR_WORKSPACE_ID:-}}}"); }
+set_env() { EV=(--env "CREW_SLUG=$SLUG" --env "CREW_TASK=$2" --env "CREW_AGENT=$1" --env "CREW_MANAGER=$SLUG-manager" --env "CREW_REPO=$REPO" --env "CREW_WS=${WS:-${CREW_WS:-${HERDR_WORKSPACE_ID:-}}}")
+  if [[ -n "${3:-}" ]]; then
+    agent_selection "$3" "${4:-}"
+    if [[ "$AGENT_KIND" == opencode ]]; then
+      EV+=(--env "OPENCODE_CONFIG_CONTENT=$(opencode_config "$3")")
+    fi
+  fi
+}
 # slot_list JOB DOMAINS: personas for a slot (job first); pragmatic-senior when no domain persona
 slot_list() { local d=${2:-pragmatic-senior}; echo "${1:+$1 }$d"; }
 # pmap_for JOB: domain personas from cmd_team's --persona args, space list
@@ -131,8 +138,13 @@ axi_of() {
 
 # brief NAME RANK TASK TEAMMATES INSTR CWD PERSONAS: prompt text for an agent (PERSONAS: space list, job first)
 brief() {
-  local name=$1 rank=$2 task=$3 mates=$4 instr=$5 cwd=$6 plist=$7 p s a seen="" skills="" bodies="" axi="" axi_line=""
-  if [[ "$(fm kind "$(rank_file "$rank")")" == opencode ]]; then body "$(rank_file "$rank")"; echo; fi
+  local name=$1 rank=$2 task=$3 mates=$4 instr=$5 cwd=$6 plist=$7 p s a seen="" skills="" bodies="" axi="" axi_line="" budget runtime=""
+  agent_selection "$rank" "${plist%% *}"
+  budget="A hook warns you when you reach it."
+  if [[ "$AGENT_KIND" == opencode ]]; then
+    budget="Automatic context warnings are unavailable in this runtime; monitor context and hand off before compaction."
+    runtime=$(opencode_guidance)
+  fi
   axi=$(axi_of "$(rank_file "$rank")" $(for p in $plist; do pfile "$p"; done))
   for a in $axi; do
     command -v "$a" >/dev/null 2>&1 || echo "herdr-crew: warning: AXI tool '$a' not on PATH (run bin/install-skills)" >&2
@@ -141,9 +153,12 @@ brief() {
 AXI tools (prefer these over raw CLIs; run with no args for a dashboard, follow help[] hints): $(echo $axi | sed 's/ /, /g')"
   for p in $plist; do
     for s in $(fm skills "$(pfile "$p")" | tr -d ' ' | tr ',' ' '); do
-      case " $seen " in *" $s "*) ;; *) seen="$seen $s"; skills="$skills /$s" ;; esac
+      case " $seen " in *" $s "*) ;; *)
+        seen="$seen $s"
+        if [[ "$AGENT_KIND" == claude ]]; then skills="$skills /$s"; else skills="$skills $s"; fi ;;
+      esac
       # plugin skills (ns:name) live elsewhere; only check user skills
-      [[ "$s" == *:* || -f "$HOME/.claude/skills/$s/SKILL.md" ]] || echo "herdr-crew: warning: skill '$s' (persona $p) not installed" >&2
+      [[ "$s" == *:* || -f "$HOME/.claude/skills/$s/SKILL.md" || -f "$HOME/.agents/skills/$s/SKILL.md" || -f "$HOME/.config/opencode/skills/$s/SKILL.md" || -f "$cwd/.agents/skills/$s/SKILL.md" ]] || echo "herdr-crew: warning: skill '$s' (persona $p) not installed" >&2
     done
     bodies="$bodies
 Persona ($p):
@@ -159,7 +174,8 @@ Lead: $SLUG-lead   Manager: $SLUG-manager   Teammates: ${mates:-none}
 Rule: run \`herdr-crew mark <T#> <status> "<note>"\` on EVERY state change (started, blocked, review, done).
 Talk to others only with \`herdr-crew say <agent> "<msg>"\`.
 Messages that were busy-queued arrive as task steps tagged [msg from X to Y]: check \`tsk list <T#> --json\` after each step.
-Context budget: ${CREW_CTX_LIMIT:-135000} tokens. A hook warns you when you reach it. Then write your handoff with \`herdr-crew handoff "<status>" <<'EOF' ... EOF\` (goal, done, in progress, next steps, files, task number). It is saved to $SDIR/handoff-$name.md. Then stop. Your initiator restarts you with the handoff.
+Context budget: ${CREW_CTX_LIMIT:-135000} tokens. $budget Then write your handoff with \`herdr-crew handoff "<status>" <<'EOF' ... EOF\` (goal, done, in progress, next steps, files, task number). It is saved to $SDIR/handoff-$name.md. Then stop. Your initiator restarts you with the handoff.
+$runtime
 Load these skills now:${skills:- none}${axi_line}
 
 Personas adopt them for job and judgment. Rank rules win over persona.
@@ -208,14 +224,12 @@ submit() {
 # model: rank `model:`; effort: job persona `effort:` > rank `effort:`
 start_agent() {
   local name=$1 rank=$2 pane=$3 job=${6:-} kind args=() out text model effort settings env_hook
-  kind="$(fm kind "$(rank_file "$rank")")"; kind="${kind:-claude}"
+  if [[ -n "${7:-}" ]]; then AGENT_JSON=$7; selection_fields; else agent_selection "$rank" "$job"; fi
+  kind=$AGENT_KIND; model=$AGENT_MODEL; effort=$AGENT_EFFORT
   if [[ "$kind" == opencode ]]; then
-    args=(--kind opencode -- --model "$(fm opencode_model "$(rank_file "$rank")")")
+    args=(--kind opencode -- --standalone)
   else
     args=(--kind claude -- --agent "crew-$rank" -n "$name")
-    model=$(fm model "$(rank_file "$rank")"); effort=""
-    [[ -n "$job" ]] && effort=$(fm effort "$(pfile "$job")")
-    [[ -n "$effort" ]] || effort=$(fm effort "$(rank_file "$rank")")
     [[ -n "$model" && "$model" != inherit ]] && args+=(--model "$model")
     [[ -n "$effort" ]] && args+=(--effort "$effort")
     # ctx-guard warns the agent at the context budget (PostToolUse and UserPromptSubmit)
@@ -228,9 +242,9 @@ start_agent() {
   if [[ -n "${CREW_DRY_RUN:-}" ]]; then
     mut herdr agent start "$name" --pane "$pane" --timeout 120000 "${args[@]}"
   elif ! out=$(herdr agent start "$name" --pane "$pane" --timeout 120000 "${args[@]}" 2>&1); then
-    [[ "$out" == *agent_not_ready* ]] || die "agent $name failed: $out"
+    [[ "$kind" == claude && "$out" == *agent_not_ready* ]] || die "agent $name failed: $out"
     text=$(herdr pane read "$pane" --source recent-unwrapped --lines 40 2>/dev/null || true)
-    grep -qi 'trust this folder' <<<"$text" || die "agent $name not ready. Pane output:"$'\n'"$text"
+    rg -qi 'trust this folder' <<<"$text" || die "agent $name not ready. Pane output:"$'\n'"$text"
     # Auto-trust, only for panes this script started. Enter alone picks "No, exit", so select "Yes" first.
     herdr agent send-keys "$name" down >/dev/null
     herdr agent send-keys "$name" enter >/dev/null
@@ -238,7 +252,7 @@ start_agent() {
   fi
   # Save only after startup succeeds; a rejected duplicate name must keep its old state.
   mkdir -p "$SDIR"
-  printf 'rank=%s\njob=%s\npane=%s\ntask=%s\n' "$rank" "$job" "$pane" "$4" >"$SDIR/$name.meta"
+  printf 'rank=%s\njob=%s\npane=%s\ntask=%s\nselection=%s\n' "$rank" "$job" "$pane" "$4" "$AGENT_JSON" >"$SDIR/$name.meta"
   printf '%s\n' "$5" >"$SDIR/$name.brief"
   submit "$name" "$5"
 }
@@ -265,17 +279,21 @@ cmd_launch() {
     return
   fi
 
+  if [[ "$RANK" == lead ]]; then
+    agent_selection lead ""; agent_check
+    agent_selection manager ""; agent_check
+  else preflight_team "$team"; fi
   target_ws
   export CREW_WS="$WS"
 
   if [[ "$RANK" == lead ]]; then
     local lead="$SLUG-lead" manager="$SLUG-manager" root orch board
     # Lead tab: lead in the root pane, manager beside it, board (tsk) below. Each pane is created with its agent's env.
-    set_env "$lead" ""
+    set_env "$lead" "" lead
     root=$(mutj '{"result":{"tab":{"tab_id":"w_dry:t1"},"root_pane":{"pane_id":"w_dry:p1"}}}' \
       herdr tab create --workspace "$WS" --cwd "$REPO" --label "crew $SLUG" --no-focus "${EV[@]}" \
       | jq -r '.result.root_pane.pane_id')
-    set_env "$manager" ""
+    set_env "$manager" "" manager
     orch=$(mutj '{"result":{"pane":{"pane_id":"w_dry:p2"}}}' \
       herdr pane split "$root" --direction right --cwd "$REPO" --no-focus "${EV[@]}" | jq -r '.result.pane.pane_id')
     set_env "$SLUG-board" ""
@@ -324,6 +342,7 @@ cmd_team() {
     case " $(team_jobs "$team" | tr '\n' ' ')" in *" ${e%%=*} "*) ;; *) die "team '$team' has no job '${e%%=*}'. jobs: $(team_jobs "$team" | tr '\n' ' ')" ;; esac
     for d in ${doms//+/ }; do check_domain "$d"; done
   done
+  preflight_team "$team"
   if [[ -n "${CREW_WS:-}" ]]; then WS=$CREW_WS; else target_ws; fi
   members=$(conf "$team" members); wt=$(conf "$team" worktree)
   [[ -n "$instr" ]] || instr=$(tsk list "$T" --json 2>/dev/null | jq -r '.[0].notes // ""' 2>/dev/null || true)
@@ -358,7 +377,7 @@ cmd_team() {
   done
   # One pane per member, each created with its own env: first is the tab's root pane, the rest splits of it
   for ((i = 0; i < ${#names[@]}; i++)); do
-    set_env "${names[$i]}" "$T"
+    set_env "${names[$i]}" "$T" "${ranks[$i]}" "${jobs[$i]}"
     if (( i == 0 )); then
       panes+=("$(mutj '{"result":{"tab":{"tab_id":"w_dry:t9"},"root_pane":{"pane_id":"w_dry:p9"}}}' \
         herdr tab create --workspace "$WS" --cwd "$cwd" --label "$T $team" --no-focus "${EV[@]}" \
@@ -518,10 +537,21 @@ cmd_handoff() {
 # restart_one NAME: /exit the agent, wait for its pane to reach the shell, start it again from its saved meta and brief.
 # The brief gets a resume line when a handoff exists. The handoff is renamed after the new agent starts.
 restart_one() {
-  local name=$1 rank job pane task i ready="" pi handoff brief
+  local name=$1 rank job pane task i ready="" pi handoff brief selection
   [[ -f "$SDIR/$name.meta" && -f "$SDIR/$name.brief" ]] || die "no saved state for $name (start it with herdr-crew first)"
   rank=$(sed -n 's/^rank=//p' "$SDIR/$name.meta"); job=$(sed -n 's/^job=//p' "$SDIR/$name.meta")
   pane=$(sed -n 's/^pane=//p' "$SDIR/$name.meta"); task=$(sed -n 's/^task=//p' "$SDIR/$name.meta")
+  selection=$(sed -n 's/^selection=//p' "$SDIR/$name.meta")
+  if [[ -n "$selection" ]]; then
+    # The pane retains its original environment, including the OpenCode session policy.
+    CONFIG_FILE="$SDIR/$name.meta"
+    config_validate "$(jq -nc --argjson s "$selection" '{version:1,roles:{member:($s|with_entries(select(.value != "")))}}')"
+    AGENT_JSON=$selection; selection_fields
+  else
+    config_load; agent_selection "$rank" "$job"; selection=$AGENT_JSON
+    [[ "$AGENT_KIND" == claude ]] || die "legacy OpenCode session has no native crew policy; relaunch the team instead of restarting"
+  fi
+  agent_check
   mut herdr agent prompt "$name" /exit >/dev/null || true
   if [[ -z "${CREW_DRY_RUN:-}" ]]; then
     for ((i = 0; i < 30; i++)); do
@@ -534,7 +564,7 @@ restart_one() {
   handoff="$SDIR/handoff-$name.md"
   brief=$(sed '/^Resume from your handoff: /d' "$SDIR/$name.brief")  # drop the resume line of an earlier restart
   if [[ -f "$handoff" ]]; then brief="$brief"$'\n'"Resume from your handoff: $handoff. Read it first. The board and the handoff show work already done: do not redo it, and do not create tasks that already exist."; fi
-  start_agent "$name" "$rank" "$pane" "$task" "$brief" "$job"
+  start_agent "$name" "$rank" "$pane" "$task" "$brief" "$job" "$selection"
   if [[ -f "$handoff" ]]; then mv "$handoff" "$SDIR/handoff-$name.$(date +%s).md"; fi
   echo "crew: restarted $name"
 }
@@ -552,7 +582,14 @@ cmd_restart() {
   fi
 }
 
+# Configuration is local and works without Herdr or tsk installed.
+source "$ROOT/lib/agent-config.sh"
 sub=${1:-}; [[ $# -gt 0 ]] && shift
+if [[ "$sub" == configure ]]; then cmd_configure "$@"; exit; fi
+for c in tsk herdr; do command -v "$c" >/dev/null || die "$c not found (tsk: brew install smarzban/tap/tsk)"; done
+case "$sub" in
+  launch|team) config_load ;;
+esac
 case "$sub" in
   launch)  cmd_launch "$@" ;;
   team)    cmd_team "$@" ;;
@@ -563,5 +600,5 @@ case "$sub" in
   watch)   cmd_watch ;;
   handoff) cmd_handoff "$@" ;;
   restart) cmd_restart "$@" ;;
-  *) die "usage: herdr-crew {launch <spec> - | team <team> <T#> [--persona <job>=<domain>[+<domain>]]... | say <agent> <msg> | mark <T#> <status> <note> | status | close <T#> [<team>] | watch | handoff \"<status>\" < handoff text | restart <agent|T#>}. spec: <rank>[@<persona>[+<persona>]] or a job persona (driver, navigator, ...)" ;;
+  *) die "usage: herdr-crew {configure [--show | ROLE AGENT [--model MODEL] [--effort EFFORT]] | launch <spec> - | team <team> <T#> [--persona <job>=<domain>[+<domain>]]... | say <agent> <msg> | mark <T#> <status> <note> | status | close <T#> [<team>] | watch | handoff \"<status>\" < handoff text | restart <agent|T#>}. spec: <rank>[@<persona>[+<persona>]] or a job persona (driver, navigator, ...)" ;;
 esac

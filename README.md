@@ -2,7 +2,7 @@
 
 ![Pixel-art HERDR-CREW command hub: Lead and Manager coordinate engineering, testing, API builds, and investigation around a shared task board.](docs/assets/herdr-crew-banner.png)
 
-herdr-crew starts a small team of Claude agents inside Herdr, a terminal program that splits one window into tabs and panes. One command, `/herdr-crew lead "<what you want>"`, starts a Lead agent that talks to you, a Manager agent that starts worker teams, and a task board. Development teams use separate Git worktrees. The investigation team reads the current repo without a new branch or worktree. Every agent shares one board, which is tsk, a small command-line task list.
+herdr-crew starts a small team of configurable agents inside Herdr, a terminal program that splits one window into tabs and panes. One command, `/herdr-crew lead "<what you want>"`, starts a Lead agent that talks to you, a Manager agent that starts worker teams, and a task board. Development teams use separate Git worktrees. The investigation team reads the current repo without a new branch or worktree. Every agent shares one board, which is tsk, a small command-line task list.
 
 **Experimental:** automated launcher checks pass, but full live development acceptance is pending. See [known limitations](#known-limitations) and [verification status](docs/STATE.md).
 
@@ -42,7 +42,7 @@ Agents talk with `herdr-crew say <agent> "<message>"` and report with `herdr-cre
 ## Requirements
 
 - **Herdr**, with the `herdr` command on your PATH.
-- **Claude Code**.
+- **Claude Code** (the default), or **OpenCode 2** for roles assigned to it. Mixed-agent teams need both selected CLIs on PATH. Authenticate each CLI separately before launching a crew.
 - **tsk**, the task board. Install it with `brew install smarzban/tap/tsk`, then run these once:
   - `tsk setup claude` registers tsk with Claude Code.
   - `tsk setup herdr` registers tsk with Herdr.
@@ -85,9 +85,48 @@ For each missing item it shows the command and asks `[y/N]`. Nothing installs un
 
 ## How to use
 
+### Configure agents for this project
+
+Run the setup in your project directory:
+
+```bash
+herdr-crew configure
+```
+
+It lists installed supported CLIs and asks for a role, agent, optional model and optional effort. Choose `all` to set the four rank defaults, then add individual job overrides. Existing job overrides remain in place. The wizard saves once at the end; EOF cancels its pending changes. For scripts or direct changes:
+
+```bash
+herdr-crew configure all claude
+herdr-crew configure driver opencode --model provider/model
+herdr-crew configure code-reviewer claude --model inherit --effort high
+herdr-crew configure --show
+```
+
+Replace `provider/model` with a model available in your authenticated OpenCode installation. Supported agents are `claude` and `opencode` (version 2). Other Herdr agent kinds, including Codex and Gemini, need permission/lifecycle adapters before they can be selected. Unsupported selections fail explicitly.
+
+Settings live in `.herdr-crew.json` in the primary project checkout. Each project's linked worker worktrees read that same file, including uncommitted configuration edits. For a manually entered linked checkout with separate Git metadata that does not identify its primary working directory, set `CREW_REPO` to the primary project directory; crew-created workers already receive it. Ambiguous checkout discovery fails rather than writing into Git metadata. You can commit it to share assignments, or keep it local. It contains agent/model settings, never credentials:
+
+```json
+{
+  "version": 1,
+  "roles": {
+    "member": { "agent": "claude", "model": "haiku" },
+    "driver": { "agent": "opencode", "model": "provider/model" }
+  }
+}
+```
+
+Valid keys are `lead`, `manager`, `member`, `inspector`, and the job personas below. Job settings override their rank; project settings override the bundled defaults. Changing agent clears inherited model/effort values from the previous runtime. With the same agent, omitted model/effort retains the inherited setting; `inherit` explicitly uses that agent's own default. Separate `effort` is supported only for Claude. OpenCode model variants (`#variant`) are not accepted yet. Deleting a role entry restores inheritance. Without a config file, the existing Claude defaults apply. There are no user-wide overrides.
+
+Selection changes apply to new launches. Restart keeps the saved agent/model/effort in the same pane; it does not migrate a running session to another agent. Configure and `--show` need no Herdr server or tsk. Launch preflight checks the selected executables and OpenCode major version before creating tasks, worktrees or panes.
+
+OpenCode receives a per-pane native role policy and runs with `--standalone`. Read-only ranks retain their command allowlists; members have edit/shell access and explicit Git push/merge denies. Subagents are disabled to prevent a broader helper policy bypassing the rank. Member access outside the working directory may ask for approval. Managed runtime configuration and trusted plugins remain part of the runtime's trust boundary.
+
+Claude keeps its hooks, Skill/Explore and Monitor workflow. OpenCode uses portable skills and bounded shell waits; automatic crew context warnings and asynchronous Monitor wakeups are unavailable. It reports these limits and hands off before compaction. Claude plugin skills are not automatically portable. The current `install-skills` installer still targets Claude; install portable skills for OpenCode through its normal skill installation paths. The generated brief identifies the verified crew installation path. Runtime policy enforcement and full cross-agent orchestration still need live acceptance; automated fixtures are not that evidence.
+
 ### Start a crew
 
-Open a Herdr pane, change into your repo, start Claude Code there, and type:
+Open a Herdr pane, change into your repo, and invoke the herdr-crew skill from your configured agent (or run `herdr-crew launch lead "<instructions>"` in the shell). For the default Claude installation, type:
 
 ```
 /herdr-crew lead "Add a CSV export button to the reports page"
@@ -195,7 +234,7 @@ Unchanged state prints nothing. Set `CREW_WATCH_SECS` to change the interval. Th
 
 ### Context budget and handoffs
 
-Each agent has a budget of 135000 tokens, set with `CREW_CTX_LIMIT`. A hook, `bin/ctx-guard`, warns the agent once per session when it reaches the budget. The agent then writes a handoff and stops:
+Claude agents have a warning budget of 135000 tokens, set with `CREW_CTX_LIMIT`. A hook, `bin/ctx-guard`, warns once per session when it reaches the budget. OpenCode agents must monitor context themselves; they do not receive this hook. The agent then writes a handoff and stops:
 
 ```bash
 herdr-crew handoff "half done, tests pass" <<'EOF'
@@ -268,7 +307,7 @@ A rank sets what an agent may do. The rank files live in `ranks/`, and symlinks 
 | `member` | Reads and writes files in its own worktree and commits on its branch. Never pushes or merges. | haiku | high | Default | none |
 | `inspector` | Read-only. Reviews, navigates, triages bugs, runs tests. | haiku | xhigh | Default | none (see AXI tools) |
 
-Effort sets how much the model thinks before it answers. A job persona can set its own effort, which overrides the rank's.
+These are bundled Claude defaults. Project agent assignments override them. Effort sets how much the model thinks before it answers. A job persona can set its own Claude effort, which overrides the bundled rank effort; explicit project settings take precedence.
 
 ### Personas
 
@@ -388,14 +427,16 @@ worktree=new
 - `worktree` is one of `new` (branch from HEAD), `from-pair` (branch from `crew/T#-pair` when it exists), `pair-branch` (detached checkout of `crew/T#-pair`, fails if missing), or `none` (current repo, used by the Lead layout and investigation).
 - The Manager's rules name the teams, so add the new team there too. `SKILL.md` lists them as well.
 
-### Change a model or effort
+### Change a bundled default model or effort
+
+Prefer `herdr-crew configure` for project-specific changes. Editing bundled files changes the installation defaults for projects without overrides.
 
 - Edit `model:` (`opus`, `haiku`, or `inherit`) or `effort:` in the rank file. `inherit` passes no `--model` flag, so Claude Code's default applies.
 - Edit a persona's `effort:` to change one job. It overrides the rank.
 
 ### Use OpenCode for a rank
 
-The launcher can start a rank in OpenCode instead of Claude Code. Add `kind: opencode` and `opencode_model: <model name>` to the rank file. Its body then becomes the agent's instructions. No rank uses this today, and the test script does not cover it, so try it on a throwaway task first.
+Use `herdr-crew configure <rank-or-job> opencode --model provider/model`. OpenCode 2 is required. Legacy rank frontmatter (`kind: opencode`, `opencode_model:`) remains a fallback when no project override applies, with the same version/permission checks. Existing OpenCode sessions without saved native-policy metadata must be relaunched rather than restarted.
 
 ## Testing
 
@@ -404,6 +445,7 @@ From the skill directory, run:
 ```bash
 /bin/bash test/dry-run.sh
 /bin/bash test/worktrees.sh
+/bin/bash test/agent-config.sh
 ```
 
 The test puts fake `herdr`, `tsk`, and `git` commands first on your PATH, and checks the calls they record. No real agents start and no real tasks are made. Each check prints `PASS` or `FAIL`, and the run ends with `ALL PASS` or a failure count.
