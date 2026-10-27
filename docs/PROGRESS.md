@@ -2,6 +2,13 @@
 
 Newest entries first. Each entry gives the date and what changed.
 
+## 2026-10-27
+
+- User authorized feature commit, normal push and PR creation after local implementation/review completed. Preparing publication from feat/project-agent-config; merge, installation, live acceptance and cleanup remain outside scope. Remote main still matches base 865135a and no PR already exists for this head at preflight. The completion receipt is kept in the main coordinating checkpoint and feature ledger.
+
+- Implemented approved per-project agent assignments in isolated feat/project-agent-config: configure wizard and argument-based role/model/effort updates, editable JSON, shared worktree configuration, Claude/OpenCode 2 native adapters, complete-team preflight and saved restart selections. Added focused real-Git/disposable-HOME fixtures and runtime guidance; updated README/SKILL/reference/planner path and ADR 0018. Existing main-checkout edits/index preserved; no installation/integration/remote writes.
+- Regression evidence: missing configure RED 1 to GREEN; adapters RED 1 (9 failures) to GREEN; unsupported variant RED 1 (2 affected checks) to GREEN. Independent review found three P2 issues; four new assertions went RED 1 before fixing JSON-stream writes, separated-metadata checkout resolution and rank-only preflight. Final 42 focused, 170 launcher and four real-Git checks exit 0. Seven individual Bash syntax checks, whitespace and affected documentation links exit 0. Reviewer rechecked fixes with no remaining P1/P2 blocker. Live native policies/orchestration/model selection remain untested; OpenCode context hooks/Monitor and additional runtime adapters are explicit gaps. No commit/push/merge/live agents.
+
 ## 2026-10-15
 
 - User authorized committing and pushing the visual-planning feature branch. Implementation remains a643765; this documentation-only handoff update records the authorization and preserves live-acceptance limits. Push completion must be confirmed by exact remote branch hash; main and its separate local work are not part of this action.

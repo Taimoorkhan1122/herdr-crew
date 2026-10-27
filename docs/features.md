@@ -1,13 +1,14 @@
 # Current feature reference
 
-Checked against the scripts, team configurations, ranks, and personas on 2026-10-14. This inventory describes built behavior. [STATE.md](STATE.md) records which behavior has automated or live evidence. The [README](../README.md) provides the user walkthrough.
+Checked against the scripts, team configurations, ranks, and personas on 2026-10-27. This inventory describes built behavior. [STATE.md](STATE.md) records which behavior has automated or live evidence. The [README](../README.md) provides the user walkthrough.
 
 ## Commands and options
 
-The launcher is [bin/crew](../bin/crew). It requires tsk, jq, and herdr on PATH before dispatch. Other used utilities include Bash, Git, rg, shasum, readlink, awk, sed, and standard shell utilities. It has no separate help subcommand; missing or unknown commands print usage and fail.
+The launcher is [bin/crew](../bin/crew). Runtime commands require tsk, jq, and herdr on PATH. Configure only needs jq and the standard local utilities; it does not invoke Herdr/tsk or start agents. Other used utilities include Bash, Git, rg, shasum, readlink, awk, sed, and standard shell utilities. It has no separate help subcommand; missing or unknown commands print usage and fail.
 
 | Command | Inputs and behavior |
 |---|---|
+| `configure [--interactive \| --show \| ROLE AGENT [--model MODEL] [--effort EFFORT]]` | Human wizard or noninteractive per-project assignment; shows effective rank/job settings. Supports Claude and OpenCode 2. EOF cancels the wizard; invalid input leaves the file unchanged. `all` sets four rank defaults and preserves job overrides. |
 | `launch <spec> -` | Reads instructions from stdin. Without `-`, remaining words are instructions. Empty instructions fail. `lead` starts Lead, Manager, and board; a job creates a ready tsk task and starts its configured team. |
 | `team <team> <T#> [--persona <job>=<domain>[+<domain>]]... ["instructions"]` | Starts an existing task's team. Repeat `--persona` for different slots. Explicit instructions override task notes in the brief. With no instructions, reads task notes. |
 | `say <agent> "<message>"` | Sends to idle/done agents, or waits up to 20 seconds. If a task worker stays busy, appends a tagged message to its task. Lead/Manager names have no T number; when busy, their message can remain undelivered despite exit 0. Check the output. |
@@ -16,7 +17,7 @@ The launcher is [bin/crew](../bin/crew). It requires tsk, jq, and herdr on PATH 
 | `close <T#> [<team>]` | Closes matching tabs in the selected workspace. Without a team, matches the `T# ` label prefix. With a team, matches its exact label. Retains worktrees and prints removal commands for existing paths. |
 | `watch` | Polls open and done tasks, known crew agents, and handoff files. Prints status changes, blocked/done/disappeared agents, and new handoffs. A failed task read retains the prior snapshot. |
 | `handoff "<status>"` | Reads the multiline body from stdin, or uses the existing handoff file. Adds a task step when CREW_TASK exists and notifies the initiator. Does not terminate the agent itself. |
-| `restart <agent\|T#>` | Reads saved rank/job/pane/task/brief. Requests exit, waits up to 30 seconds for the pane's shell, then starts again. Adds an existing handoff pointer and archives the handoff after startup. A T number selects all saved agents of that task. |
+| `restart <agent\|T#>` | Reads saved rank/job/pane/task/brief and resolved agent/model/effort. The original pane environment preserves OpenCode native session policy. Configuration edits apply only to new launches. Requests exit, waits up to 30 seconds for the pane's shell, then starts again. Adds an existing handoff pointer and archives the handoff after startup. A T number selects all saved agents of that task. |
 
 Spec forms are `lead`, `<rank>@<job>[+<domain>]`, or a bare job. `lead@<domain>` also uses the parser's domain composition. One job is allowed per spec, and its rank must match. Unknown names and invalid team persona slots fail before launch mutations. A fresh code-reviewer launch is refused because it lacks an existing pair branch.
 
@@ -25,7 +26,9 @@ Spec forms are `lead`, `<rank>@<job>[+<domain>]`, or a bare job. `lead@<domain>`
 - [ranks/](../ranks/) sets permissions, model, effort, and communication rules: Lead opus/high, Manager haiku/max, member haiku/high, inspector haiku/xhigh. Model aliases resolve through the native runtime.
 - [personas/](../personas/) defines eight jobs: driver, navigator, tester, code-reviewer, qa-bug-triager, qa-bug-reproducer, investigator, planner. Five domains are pragmatic-senior, nestjs-expert, react-expert, ui-expert, security-paranoid. Default domain is pragmatic-senior.
 - Persona `rank:` defines a job; domains omit it. Optional `skills:` and `axi:` are merged into the brief. A job's `effort:` overrides rank effort. A domain's effort does not set the launch effort.
-- A rank's `model: inherit` omits the model flag. `kind: opencode` selects the alternate backend and `opencode_model:` supplies its model. No current rank uses it; live compatibility is not established.
+- `.herdr-crew.json` (`version: 1`, `roles` keyed by rank/job) in the primary project checkout sets `agent` and optional `model`/`effort`. Linked worktrees share even uncommitted settings. Separated Git metadata uses the verified primary top-level; ambiguous manually entered linked checkouts require `CREW_REPO` pointing to the primary checkout (already set for crew-created workers). Job overrides beat rank overrides, which beat bundled defaults. Switching agent clears the previous runtime's inherited model/effort; `inherit` omits the flag explicitly. No user-wide override is read.
+- `claude` and `opencode` (major 2) have native adapters. Other Herdr kinds are rejected. OpenCode separate effort and model variants are unsupported. Configuration errors, missing binaries and unsupported versions are checked before new launch resources. `configure --show` does not check credentials/model availability.
+- Legacy rank `kind: opencode` / `opencode_model:` remains a fallback with the same native adapter checks. Claude uses rank `model:` and job/rank effort unless overridden. Restart retains resolved settings; legacy Claude metadata resolves through current config, while legacy OpenCode metadata without a native session policy is refused.
 - [teams/](../teams/) defines members and worktree modes. The first member gets the root pane; later members split from it. `launch lead` has a special Lead/Manager/board layout.
 - Slug: six normalized repo-name characters plus four path-hash characters, prefixed with `x` if needed. Worker names contain slug, lowercase task number, and job, truncated to 32 characters. Long customized names can collide; uniqueness is checked by Herdr at startup.
 - Saved state lives at `~/.herdr/crew/<slug>/`: `<agent>.meta`, `<agent>.brief`, handoff files, and context-warning markers. This is separate from tsk's task storage.
@@ -45,7 +48,11 @@ Spec forms are `lead`, `<rank>@<job>[+<domain>]`, or a bare job. `lead@<domain>`
 | Visual planning (`plan`) | One planner (member) writes plan Markdown/Mermaid and a local HTML/SVG projection in a new/retained crew/T#-plan worktree. Manager checks drafting coverage and reports plan ready; Lead records explicit versioned approval before development. Revisions reuse the task/worktree and retain approval history. No launcher subcommand or board state was added. |
 | Standalone jobs | Direct launch creates the task and team, but does not create a Manager. Job results at review require manual acceptance or an existing Manager. |
 
-Members use native edit permissions and session Bash denies for `git push`/`git merge`. Inspectors deny Edit/Write and have a restricted command list. Investigation further excludes test/build commands that may write. These are native tool permissions and instructions, not a separate operating-system sandbox.
+Claude members use native edit permissions and session Bash denies for `git push`/`git merge`. Inspectors deny Edit/Write and have a restricted command list. Investigation further excludes test/build commands that may write. These are native tool permissions and instructions, not a separate operating-system sandbox.
+
+OpenCode 2 uses `OPENCODE_CONFIG_CONTENT` supplied separately to every agent pane and `--standalone` so the private server reads that pane's policy. A generated primary agent embeds the rank body and runtime guidance. Ordered native permissions deny unknown tools, allow read/search/skills and the rank's shell allowlist, and give members edit/shell access followed by Git push/merge denies. Subagent actions stay denied; member external-directory access asks for approval. Managed runtime settings/trusted plugins remain authoritative. [ADR 0018](adr/0018-project-agent-config.md) records the source references and limits.
+
+OpenCode replaces Claude-only helper/Monitor/plugin instructions with direct read-only lookups, portable skill loading and bounded waits. It has no crew context hook or asynchronous Monitor wakeup equivalent. Runtime prompts disclose that limitation. Full autonomous behavior and native permission enforcement remain live acceptance work.
 
 ## Visual planning contract
 
@@ -76,7 +83,7 @@ Every created pane explicitly receives CREW_SLUG, CREW_TASK, CREW_AGENT, CREW_MA
 
 ## Hooks and startup recovery
 
-These hooks are passed as per-session Claude `--settings`; they do not install global hooks.
+These hooks are Claude-only, passed as per-session `--settings`; they do not install global hooks.
 
 | Hook | Built behavior and limit |
 |---|---|
@@ -99,6 +106,7 @@ It combines persona skills with all skill names in [skills.sources](../skills.so
 - [README](../README.md): usage, rank/persona/team tables, customization, examples, limits.
 - [SKILL](../SKILL.md): agent entry point and launch instructions.
 - [STATE](STATE.md): current verification scope and open issues. [PROGRESS](PROGRESS.md): dated history.
+- `test/agent-config.sh`: real Git and disposable HOME with fake runtime executables; configuration, wizard cancellation, policy/argv, preflight and pinned restart coverage. No live agent behavior.
 - [ADRs](adr/): historical decisions, including models, permissions, worktrees, communication, installation, AXI, lifecycle, hooks, and Q&A.
 - [Q&A plan](superpowers/plans/2026-10-14-project-qa.md): intended behavior, execution results, and remaining acceptance gaps.
 - [Test-concurrency research](research/test-concurrency.md): unimplemented proposal. No test-slot environment controls, `test`/`tests` subcommands, or semaphore are shipped.

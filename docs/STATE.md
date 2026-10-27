@@ -2,6 +2,15 @@
 
 Status as of 2026-10-14. Crew launch and project Q&A have live scratch-repo evidence; full development acceptance remains pending. Two live problems are open: the Haiku driver claimed it had no shell, and the Manager used an archived task number. Live test 3 (review and test teams) has not run. Verification is tracked per feature below; launch tests do not establish full lifecycle acceptance.
 
+## Per-project agent configuration (2026-10-27)
+
+- Added `.herdr-crew.json` with rank defaults/job overrides, a human configure wizard, argument-based assignments and resolved `--show` output. Configuration belongs to the primary project checkout and is shared with worker worktrees, including uncommitted edits. Optional user-wide defaults are deferred.
+- Native adapters support Claude and OpenCode 2. Other kinds fail explicitly. Claude settings/hooks remain; OpenCode gets per-pane inline native role policy with standalone mode and runtime-specific skill/helper/context guidance. No global/provider settings are changed. Saved selection plus original pane environment pins restart; legacy OpenCode metadata without policy is refused.
+- OpenCode has no crew context-warning hook or asynchronous Monitor equivalent. Subagents are disabled; missing/plugin-only skills are reported. Separate effort/model variants are unsupported. Managed runtime policy and trusted plugins remain runtime trust boundaries. No full parity or live behavior is claimed.
+- Automated evidence: configure missing-feature RED exit 1 then GREEN; adapter RED exit 1 (9 failures) then GREEN; unsupported model variant RED exit 1 (2 affected checks) then GREEN. Independent review's three P2 issues gained four failing regressions (RED exit 1) before correction. Final `test/agent-config.sh`: 42 checks, exit 0; `test/dry-run.sh`: 170 checks, exit 0; `test/worktrees.sh`: four checks, exit 0. Seven shell syntax checks (five required scripts plus helper/new suite), whitespace and affected documentation links passed, exit 0. Fixtures use disposable HOME/projects and fake runtimes; they do not prove live permission enforcement.
+- Independent final source review rechecked all three findings and found no remaining P1/P2 blocker. Fixes reject JSON streams before writes, resolve actual primary working directories with separated-metadata fail-safe behavior, and preserve rank-only team slots. Ambiguous manually entered linked checkouts require `CREW_REPO`; crew-created workers already receive it.
+- No live agent/model calls, authentication/model-availability checks, installation, merge, commit, push or publication. Existing handoff race and historical acceptance gaps below remain unresolved. See [ADR 0018](adr/0018-project-agent-config.md) and the README for the exact command/schema and runtime limits.
+
 ## Visual planning (2026-10-14)
 
 - Added a planner member job and plan team, with a shared contract/template and source-grounded diagram example. No bin/crew, ctx-guard or dependency-installer changes.

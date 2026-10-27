@@ -1,5 +1,22 @@
 # Lead state and session checkpoint
 
+## Active checkpoint: project agent configuration
+
+Updated: 2026-10-27 11:53 PKT (Asia/Karachi).
+
+- Objective/approval: user approved per-project role-to-agent configuration and configure entry point. Local implementation, verification and independent review are complete. User subsequently authorized committing, pushing and opening a PR against main. Publication is being prepared; merge, installation, live crew acceptance and cleanup remain unauthorized.
+- Repository: feat/project-agent-config in the isolated .superpowers/worktrees/agent-config worktree, based on main commit 865135a290445890220eb192366bba624d5b2c9b. Publication snapshot: base commit shown above; inspect git log/status for the implementation commit. Only this feature worktree's named files are included in the commit. Preserve main's pre-existing checkpoint/progress and visual-planning spec/plan edits.
+- Changed files: bin/crew, new lib/agent-config.sh and test/agent-config.sh; existing test fixtures; README.md, SKILL.md, personas/planner.md, docs/features.md, docs/STATE.md, docs/PROGRESS.md, this checkpoint; new ADR 0018 and 2026-10-27 project-agent-config spec/plan. The ignored plan ledger is .superpowers/sdd/2026-10-27-project-agent-config/progress.md.
+- Behavior: editable .herdr-crew.json in the primary project checkout; human wizard plus role/agent/model/effort arguments and --show; rank defaults/job overrides; no global default file. Claude/OpenCode 2 adapters enforce declared native rank restrictions and preflight all slots. Restart retains saved selection and original pane policy environment. Other agents, OpenCode effort/variants, automatic OpenCode crew context warnings and asynchronous Monitor are unsupported and explicit.
+- Evidence: test/agent-config.sh 42 checks exit 0; test/dry-run.sh 170 checks exit 0; test/worktrees.sh four checks exit 0. Each of seven scripts separately passed /bin/bash -n, exit 0. Whitespace and affected doc links pass. Independent final source review found three P2 issues, each fixed with regression evidence (four failures RED 1 to GREEN 0); recheck found no remaining P1/P2 blocker. Earlier feature RED/GREEN evidence is in STATE/PROGRESS/ledger.
+- Work in hand: coordinating agent owns completed local changes; nothing running in Herdr and no live test fixture resources. Runtime selection/authentication, live native policy enforcement and full handoff/orchestration acceptance remain unverified. Existing handoff-path race and separate maintainability findings remain parked. Normal crew workers carry CREW_REPO; ambiguous manually entered linked checkouts with separate metadata fail with an explicit primary-project pointer requirement.
+- Failed approaches: Skillkit catalog lacked using-superpowers (filesystem skill used); native worktree creation needed automatic sandbox escalation; initial test instrumentation needed argument separators/inherited environment capture. Git worktree inventory alone was insufficient for separate metadata; final discovery verifies an actual working directory and refuses ambiguity.
+- Publication scope: normal push of feat/project-agent-config, then a non-draft PR against main using gh-axi. A completion receipt belongs in the main checkout's coordinating checkpoint and ignored feature ledger; revalidate remote equality and PR identity before claiming success. No merge or removal.
+- Ordered next actions: (1) run `git status --short --branch` and `git log -1` in this feature worktree; (2) check `gh-axi pr list --state all --head feat/project-agent-config` and the main coordinating checkpoint for publication receipt; (3) preserve the worktree for PR feedback and await explicit merge/installation/live-acceptance instructions. Do not restart historical workers or implement separate maintenance findings.
+
+## Historical checkpoint retained below
+
+
 Updated: 2026-10-15 00:44 PKT.
 
 ## Objective and authorization

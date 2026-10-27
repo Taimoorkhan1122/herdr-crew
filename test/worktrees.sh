@@ -19,6 +19,7 @@ cat >"$TEMP_ROOT/fake/tsk" <<'FAKE'
 #!/usr/bin/env bash
 echo '[{"number":7,"notes":"worktree regression"}]'
 FAKE
+printf '#!/usr/bin/env bash\nexit 0\n' >"$TEMP_ROOT/fake/claude"
 chmod +x "$TEMP_ROOT/fake/"*
 export PATH="$TEMP_ROOT/fake:$PATH" HOME="$TEMP_ROOT/home" HERDR_ENV=1 CREW_WS=w1
 export CREW_REPO="$TEMP_ROOT/repo" CREW_SLUG=fixture
