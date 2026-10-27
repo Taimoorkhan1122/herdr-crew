@@ -51,7 +51,7 @@ expect 'noninteractive bare configure never waits for input' '[[ $rc != 0 && "$o
 # No model is guessed for another agent, and job-specific settings win.
 run member opencode
 run --show
-expect 'agent changes clear inherited Claude model and effort' '[[ $rc == 0 && "$out" == *opencode* ]]'
+expect 'agent changes clear inherited Claude model and effort' '[[ $rc == 0 && $'\''\n'\''"$out"$'\''\n'\'' == *$'\''\nmember\topencode\tdefault\tdefault\n'\''* ]]'
 git -C "$PROJECT" worktree add -qb worker "$TEMP_ROOT/worker"
 cd "$TEMP_ROOT/worker"
 run navigator claude --model alternate

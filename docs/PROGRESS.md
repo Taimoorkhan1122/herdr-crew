@@ -4,6 +4,8 @@ Newest entries first. Each entry gives the date and what changed.
 
 ## 2026-10-27
 
+- PR #2 review follow-up: sub-agent validated PR Lens finding at d673e65 and strengthened the single agent-switch assertion to require member/opencode/default/default. Disposable mutation retaining haiku/high passed the old assertion and failed the new one; runtime files unchanged. Parent and sub-agent each ran focused42 checks exit0; launcher170, real-Git4, seven Bash syntax checks and whitespace exit0. No findings skipped. Normal PR-branch update is being prepared; no merge, live agent or installation.
+
 - User authorized feature commit, normal push and PR creation after local implementation/review completed. Preparing publication from feat/project-agent-config; merge, installation, live acceptance and cleanup remain outside scope. Remote main still matches base 865135a and no PR already exists for this head at preflight. The completion receipt is kept in the main coordinating checkpoint and feature ledger.
 
 - Implemented approved per-project agent assignments in isolated feat/project-agent-config: configure wizard and argument-based role/model/effort updates, editable JSON, shared worktree configuration, Claude/OpenCode 2 native adapters, complete-team preflight and saved restart selections. Added focused real-Git/disposable-HOME fixtures and runtime guidance; updated README/SKILL/reference/planner path and ADR 0018. Existing main-checkout edits/index preserved; no installation/integration/remote writes.
