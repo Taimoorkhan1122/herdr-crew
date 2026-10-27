@@ -346,7 +346,7 @@ Worktrees live at `~/.herdr/worktrees/<slug>/T<n>-<team>`. The `<slug>` is the f
 
 ### Commands
 
-Every command explains itself. `herdr-crew help` lists them, `herdr-crew help <command>` and `herdr-crew <command> --help` show one command's arguments, options and examples, and `herdr-crew --version` prints the version. Global options go before the command: `--dry-run` (the same as `CREW_DRY_RUN=1`), `--help`, `--version`.
+Every command explains itself. `herdr-crew help` lists them, `herdr-crew help <command>` and `herdr-crew <command> --help` show one command's arguments, options and examples, and `herdr-crew --version` prints the version. All five help forms work without tsk, herdr or jq on PATH. Git is still required, because repo and slug resolution runs first. Global options go before the command: `--dry-run` (the same as `CREW_DRY_RUN=1`), `--help`, `--version`.
 
 | Command | What it does |
 |---|---|

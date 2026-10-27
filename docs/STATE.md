@@ -9,6 +9,7 @@ Status as of 2026-10-14. Crew launch and project Q&A have live scratch-repo evid
 - `status` prints `T<number><TAB><status><TAB><title>` rows and then the agent rows, instead of dumping the raw task JSON. `status --json` prints that JSON for scripts. Errors now list the valid values or the next command. `close` outside a workspace fails with its own message instead of a Bash parameter error. `watch` handles Ctrl+C.
 - Automated evidence: 41 new assertions went RED before implementation, then 222 checks in `test/dry-run.sh` exit 0, four real-Git checks exit 0, and 68 configuration checks exit 0. Each of the seven scripts in the AGENTS.md verification block passed `/bin/bash -n`. Both completion scripts parse (`bash -n`, `zsh -n`).
 - Not verified live: terminal colour on a real TTY, Ctrl+C during a real `watch`, loading a completion script into an interactive shell, and any agent launch. No live Herdr session, task, or agent ran for this change.
+- Published as PR #4 (https://github.com/Taimoorkhan1122/herdr-crew/pull/4), base `main`, head `feat/cli-upates`, commit `a90c2bd`. The branch also carries the user's `cli-developer` reference commit `182a65a`. GitGuardian checks pass; PR Lens was pending at publication. Merge, installation and release did not run.
 - One pre-existing test bug was fixed: `test/agent-config.sh` did not reset `rc` before its final check, so that check failed on unmodified HEAD as well.
 
 ## Per-project agent configuration (2026-10-27)

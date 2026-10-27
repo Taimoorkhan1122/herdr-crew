@@ -160,11 +160,6 @@ config_choose() {
 
 cmd_configure() {
   local role agent model="" effort="" again found="" tool variants
-  case "${1:-}" in
-    --help|-h)
-      usage_configure
-      return ;;
-  esac
   config_load
   if [[ "${1:-}" == --show ]]; then
     [[ $# == 1 ]] || die "--show takes no other arguments"

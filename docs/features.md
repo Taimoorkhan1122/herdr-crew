@@ -4,7 +4,9 @@ Checked against the scripts, team configurations, ranks, and personas on 2026-10
 
 ## Commands and options
 
-The launcher is [bin/crew](../bin/crew). Runtime commands require tsk, jq, and herdr on PATH. Configure only needs jq and the standard local utilities; it does not invoke Herdr/tsk or start agents. Other used utilities include Bash, Git, rg, shasum, readlink, awk, sed, and standard shell utilities. `help` and `--version` need none of the three runtimes, so they work on a bare machine. The terminal UX layer is [lib/ux.sh](../lib/ux.sh).
+The launcher is [bin/crew](../bin/crew). Runtime commands require tsk, jq, and herdr on PATH. Configure only needs jq and the standard local utilities; it does not invoke Herdr/tsk or start agents. Other used utilities include Bash, Git, rg, shasum, readlink, awk, sed, and standard shell utilities. The terminal UX layer is [lib/ux.sh](../lib/ux.sh).
+
+`--help`, `--version`, `help`, `help <command>` and `<command> --help` are pure text. They run before the jq, tsk and herdr checks, so they work on a machine that has none of the three. Repo and slug resolution still runs first, so Git is required for every invocation, help included.
 
 | Command | Inputs and behavior |
 |---|---|
@@ -24,11 +26,11 @@ The launcher is [bin/crew](../bin/crew). Runtime commands require tsk, jq, and h
 | `--version`, `-V` | Global, before the command. Prints `git describe` for the installation, or `dev`, and exits 0. |
 | `--dry-run` | Global, before the command. Same effect as `CREW_DRY_RUN=1`. |
 
-Global options must come before the command, so instructions can never be read as an option. `--help`, `--version` and `help` run before the tsk, herdr and jq checks, so they work on a machine that has none of them.
+Global options must come before the command, so instructions can never be read as an option. `--help`, `--version`, `help`, `help <command>` and `<command> --help` run before the tsk, herdr and jq checks, so they work on a machine that has none of them. Git is still required, because repo and slug resolution runs first.
 
 ## Output and help
 
-[lib/ux.sh](../lib/ux.sh) holds the terminal layer. It is sourced before the tsk, herdr and jq checks, so help and version never need them.
+[lib/ux.sh](../lib/ux.sh) holds the terminal layer. `bin/crew` sources it before the jq, tsk and herdr checks, and the dispatch handles every pure-text path before those checks. So `--help`, `--version`, `help`, `help <command>` and `<command> --help` work with none of the three on PATH. Git is still required for every invocation, because repo and slug resolution runs first.
 
 - Result lines start with `crew:`, progress lines with `->`, warnings with `warning:` on stderr. Warnings never fail a command.
 - Colour is used only when stdout is a terminal, and `NO_COLOR` or `TERM=dumb` turns it off. Colour decorates the words; it never replaces them, and no message text changed.

@@ -482,14 +482,23 @@ rc=0; out=$("$CREW" --version 2>&1) || rc=$?
 (( rc == 0 )) && [[ -n "$out" ]] && pass "version: --version exits 0 ($out)" || flunk "version: --version rc=$rc"
 rc=0; out=$("$CREW" -V 2>&1) || rc=$?
 (( rc == 0 )) && pass "version: -V exits 0" || flunk "version: -V rc=$rc"
-# help and version must not need tsk, herdr or jq: stubs that log if they run
-STUB="$TMP/stub"; mkdir -p "$STUB"
-for t in tsk herdr jq; do printf '#!/usr/bin/env bash\necho "STUB %s" >>"$LOG"\nexit 127\n' "$t" >"$STUB/$t"; chmod +x "$STUB/$t"; done
-reset
-rc=0; out=$(env PATH="$STUB:$PATH" "$CREW" --help 2>&1) || rc=$?
-(( rc == 0 )) && [[ $(cnt 'STUB') == 0 ]] && pass "help: works without tsk, herdr or jq" || flunk "help: needs a runtime (rc=$rc, $out)"
-rc=0; out=$(env PATH="$STUB:$PATH" "$CREW" --version 2>&1) || rc=$?
-(( rc == 0 )) && [[ $(cnt 'STUB') == 0 ]] && pass "version: works without tsk, herdr or jq" || flunk "version: needs a runtime (rc=$rc, $out)"
+# help and version must work on a machine with no tsk, herdr or jq at all.
+# A stub on PATH proves nothing, because `command -v` still succeeds and the
+# dependency check passes. This farm really lacks the three runtimes.
+NORUN="$TMP/norun"; mkdir -p "$NORUN"
+( IFS=:; for d in $PATH; do for f in "$d"/*; do b=${f##*/}; case "$b" in jq|tsk|herdr) ;; *) ln -s "$f" "$NORUN/$b" 2>/dev/null || true ;; esac; done; done )
+norun_ok=0
+for probe in jq tsk herdr; do PATH="$NORUN" command -v "$probe" >/dev/null || norun_ok=$((norun_ok + 1)); done
+(( norun_ok == 3 )) && pass "no-runtime farm: jq, tsk and herdr are absent" || flunk "no-runtime farm: a runtime is still present"
+for probe in "--help" "help" "help team" "launch --help" "configure --help"; do
+  rc=0; out=$(env PATH="$NORUN" "$CREW" $probe 2>&1) || rc=$?
+  (( rc == 0 )) && in_out "no-runtime: [$probe] prints help" "USAGE" "$out" || flunk "no-runtime: [$probe] rc=$rc, $out"
+done
+rc=0; out=$(env PATH="$NORUN" "$CREW" --version 2>&1) || rc=$?
+(( rc == 0 )) && [[ -n "$out" ]] && pass "no-runtime: --version works ($out)" || flunk "no-runtime: --version rc=$rc, $out"
+# a command that is not pure text still reports the missing runtime
+rc=0; out=$(env PATH="$NORUN" "$CREW" status 2>&1) || rc=$?
+(( rc != 0 )) && in_out "no-runtime: status still reports the missing jq" "jq not found" "$out" || flunk "no-runtime: status rc=$rc, $out"
 reset
 rc=0; out=$("$CREW" nope 2>&1) || rc=$?
 (( rc != 0 )) && in_out "unknown command: names it" "unknown command 'nope'" "$out" || flunk "unknown command: rc=$rc"

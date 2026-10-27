@@ -11,10 +11,9 @@ mut() { if [[ -n "${CREW_DRY_RUN:-}" ]]; then echo "+ $*" >&2; else "$@"; fi; }
 # mutj FAKE_JSON CMD...: mutating command whose JSON stdout is needed
 mutj() { local fake=$1; shift; if [[ -n "${CREW_DRY_RUN:-}" ]]; then echo "+ $*" >&2; echo "$fake"; else "$@"; fi; }
 
-# UX layer first: --help and --version work without tsk, herdr or jq.
+# UX layer: colour, symbols, help text, completions. Sourced before any dependency
+# check, and the dispatch handles the pure-text paths before it checks for jq.
 source "$ROOT/lib/ux.sh"
-
-command -v jq >/dev/null || die "jq not found on PATH (install: brew install jq)"
 
 # Repo and slug. Slug = 6 chars of the basename + 4 hex of the repo path, so same-named repos differ.
 # Panes crew creates carry CREW_* so worktree subshells keep the main repo's identity.
@@ -605,35 +604,31 @@ while (( $# )); do
   esac
 done
 sub=${1:-}; [[ $# -gt 0 ]] && shift
+# show_help NAME: one command's help text, or a failure that names the command.
+show_help() { "usage_$1" 2>/dev/null || die "unknown command '$1'. Run: herdr-crew help"; }
+# Pure-text paths run before every dependency check, so help and version work on a
+# machine with no jq, tsk or herdr. Repo and slug resolution above still needs git.
+case "$sub" in
+  "") usage >&2; exit 1 ;;
+  help) [[ $# -gt 0 ]] && show_help "$1" || usage; exit 0 ;;
+esac
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then show_help "$sub"; exit 0; fi
+command -v jq >/dev/null || die "jq not found on PATH (install: brew install jq)"
 if [[ "$sub" == configure ]]; then cmd_configure "$@"; exit; fi
 for c in tsk herdr; do command -v "$c" >/dev/null || die "$c not found on PATH (tsk: brew install smarzban/tap/tsk; herdr: install Herdr first)"; done
 case "$sub" in
   launch|team) config_load ;;
 esac
-# help_or CMD SHOW ARGS...: `<command> --help` prints that command's help and exits 0.
-help_or() {
-  local cmd=$1 show=$2; shift 2
-  if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then "$show"; exit 0; fi
-  "$cmd" "$@"
-}
 case "$sub" in
-  "") usage >&2; exit 1 ;;
-  help)
-    case "${1:-}" in
-      "") usage ;;
-      configure|launch|team|say|mark|status|close|watch|handoff|restart|completion) "usage_$1" ;;
-      *) die "unknown command '$1'. Run: herdr-crew help" ;;
-    esac
-    exit 0 ;;
-  launch)  help_or cmd_launch usage_launch "$@" ;;
-  team)    help_or cmd_team usage_team "$@" ;;
-  say)     help_or cmd_say usage_say "$@" ;;
-  mark)    help_or cmd_mark usage_mark "$@" ;;
-  status)  help_or cmd_status usage_status "$@" ;;
-  close)   help_or cmd_close usage_close "$@" ;;
-  watch)   help_or cmd_watch usage_watch "$@" ;;
-  handoff) help_or cmd_handoff usage_handoff "$@" ;;
-  restart) help_or cmd_restart usage_restart "$@" ;;
-  completion) help_or cmd_completion usage_completion "$@" ;;
+  launch)  cmd_launch "$@" ;;
+  team)    cmd_team "$@" ;;
+  say)     cmd_say "$@" ;;
+  mark)    cmd_mark "$@" ;;
+  status)  cmd_status "$@" ;;
+  close)   cmd_close "$@" ;;
+  watch)   cmd_watch "$@" ;;
+  handoff) cmd_handoff "$@" ;;
+  restart) cmd_restart "$@" ;;
+  completion) cmd_completion "$@" ;;
   *) usage >&2; die "unknown command '$sub'. Run: herdr-crew help" ;;
 esac
