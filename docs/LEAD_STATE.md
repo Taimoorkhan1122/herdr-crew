@@ -1,6 +1,20 @@
 # Lead state and session checkpoint
 
-## Active checkpoint: OpenCode model/effort picker publication
+## Active checkpoint: herdr-crew command-line UX update
+
+Updated: 2026-10-27 (PKT, Asia/Karachi).
+
+- Objective/authorization: the user installed the `cli-developer` skill and asked for a complete UX update of the herdr-crew CLI. The user chose "just build it" when offered the brainstorming questions, so the scope is the CLI surface itself under this repository's existing contracts. No merge, push, publication, installation or live agent run was requested or performed.
+- Repository: branch `feat/cli-upates` (pre-existing name, including its typo) at 182a65a, in the main checkout. Work is uncommitted and unstaged. Changed files: `bin/crew`, `lib/ux.sh` (new), `lib/agent-config.sh`, `test/dry-run.sh`, `test/agent-config.sh`, `README.md`, `SKILL.md`, `AGENTS.md`, `docs/features.md`, `docs/STATE.md`, `docs/PROGRESS.md`, this checkpoint. No file was staged and no commit exists for this work.
+- Decisions: the CLI stays Bash and stays Bash 3.2 compatible; no rewrite in another language and no new dependency. Every command name, argument, exit code and launch/restart contract is unchanged, so the change is additive plus one output fix. The terminal layer went into a new `lib/ux.sh`, sourced before the tsk, herdr and jq checks, so `help` and `--version` work on a machine with none of them. Colour is TTY-only and honours `NO_COLOR`; it decorates the words and never replaces them, so every existing assertion still matches. Global options must precede the command, so an instruction can never be read as an option. `status` no longer prints the raw task JSON; `status --json` keeps that form for scripts. Shell completion was included because the `cli-developer` skill treats it as required polish; it prints a script and never installs one.
+- Completed: `help [<command>]`, `<command> --help` for all eleven commands, `--version`/`-V`, global `--dry-run`, `completion <bash|zsh>`, `crew:`/`->`/`warning:` line prefixes, a progress line per agent start, Ctrl+C handling for `watch` (exit 130), readable `status` rows plus `status --json`, error messages that list valid values or the next command, and a real error for `close` outside a workspace instead of a Bash parameter error.
+- Evidence: 41 new assertions in `test/dry-run.sh` section 27 went RED (exit 1) before implementation; the same section then passed. Final direct exits: `test/dry-run.sh` 222 checks exit 0, `test/worktrees.sh` four checks exit 0, `test/agent-config.sh` 68 checks exit 0, and each of the seven scripts in the AGENTS.md verification block passed `/bin/bash -n`. `completion bash` passes `bash -n`; `completion zsh` passes `zsh -n`. `test/agent-config.sh` also had a pre-existing bug, not caused by this change: it never reset `rc` before its final check, so that check failed on unmodified HEAD at 182a65a (67 PASS, exit 1) and passes now with one added `rc=0`.
+- Work in hand: nothing is delegated and no agent, pane, task or worktree is running. The work is uncommitted on `feat/cli-upates`. Also still open from the previous checkpoint: the authorized publication of `feat/opencode-model-picker` in `.superpowers/worktrees/opencode-model-picker` (push, PR, remote-hash verification). Its feature ledger is `.superpowers/sdd/opencode-model-picker/progress.md`. Main's separate uncommitted edits and the PATH-installed skill copy are untouched.
+- Limits: no live terminal colour, no Ctrl+C during a real `watch`, no completion script loaded into an interactive shell, and no agent launch, Herdr session or tsk task. No live acceptance of any kind ran.
+- Next: 1) `git status --short --branch` and `git diff` to review the scoped change. 2) Decide with the user whether this lands as a commit on `feat/cli-upates` or is isolated on its own branch, since the branch also carries the earlier `cli-developer` reference commit. 3) After a decision, run the verification block in AGENTS.md and record the direct exit codes here. 4) Return to the parked `feat/opencode-model-picker` publication. Merge, push, publication and cleanup all remain unauthorized.
+
+## Historical checkpoint retained below
+
 
 Updated: 2026-10-27 13:18 PKT (Asia/Karachi).
 

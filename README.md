@@ -209,7 +209,7 @@ The part before `=` is the job, and the part after `=` is the domain persona. St
 herdr-crew status
 ```
 
-It prints the task list as JSON, then one line per live agent in the form `<agent name><TAB><state>`. States are `idle`, `working`, `blocked`, `done`, and `unknown`.
+It prints one line per open task in the form `T<number><TAB><status><TAB><title>`, then one line per live agent in the form `<agent name><TAB><state>`. States are `idle`, `working`, `blocked`, `done`, and `unknown`. Add `--json` to print the raw task list instead, for scripts.
 
 ### Close a team
 
@@ -230,7 +230,7 @@ my-app-3f9c-t7-driver blocked
 handoff my-app-3f9c-t7-driver /home/you/.herdr/crew/my-app-3f9c/handoff-my-app-3f9c-t7-driver.md
 ```
 
-Unchanged state prints nothing. Set `CREW_WATCH_SECS` to change the interval. The Manager also uses Monitor for worker waits, so it can handle messages while workers run.
+Unchanged state prints nothing. Set `CREW_WATCH_SECS` to change the interval. Press Ctrl+C to stop it. The Manager also uses Monitor for worker waits, so it can handle messages while workers run.
 
 ### Context budget and handoffs
 
@@ -346,17 +346,24 @@ Worktrees live at `~/.herdr/worktrees/<slug>/T<n>-<team>`. The `<slug>` is the f
 
 ### Commands
 
+Every command explains itself. `herdr-crew help` lists them, `herdr-crew help <command>` and `herdr-crew <command> --help` show one command's arguments, options and examples, and `herdr-crew --version` prints the version. Global options go before the command: `--dry-run` (the same as `CREW_DRY_RUN=1`), `--help`, `--version`.
+
 | Command | What it does |
 |---|---|
 | `herdr-crew launch <spec> -` | Starts a crew (`lead`), or a new task with its team (a job spec). Instructions come on stdin, or as words after the spec. |
 | `herdr-crew team <team> <T#> [--persona <job>=<domain>[+<domain>]]... ["instructions"]` | Starts a team for an existing task. Optional instructions override the task notes for the brief. Workspace selection also supports other Herdr panes or a running external server. |
 | `herdr-crew say <agent> "<message>"` | Sends to an idle/done agent, or waits up to 20 seconds. Task workers can receive queued task steps. A busy Lead/Manager has no task queue; output can say `message NOT delivered` even with exit 0. |
 | `herdr-crew mark <T#> <status> "<note>"` | Sets the task status, adds the note as a step, and sets the pane title. |
-| `herdr-crew status` | Prints the task list as JSON, then each live crew agent's state. |
+| `herdr-crew status [--json]` | Prints one line per open task (T number, status, title) and one per crew agent (name, state), tab separated. `--json` prints the raw task list for scripts. |
 | `herdr-crew close <T#> [<team>]` | Closes all matching task tabs, or one team's tab. Keeps worktrees and prints removal commands for existing paths. |
-| `herdr-crew watch` | Prints one line per board change: task status, a crew agent that became `blocked` or `done` or disappeared, and each new handoff. The Lead runs it with Monitor. |
+| `herdr-crew watch` | Prints one line per board change: task status, a crew agent that became `blocked` or `done` or disappeared, and each new handoff. The Lead runs it with Monitor. Press Ctrl+C to stop. |
 | `herdr-crew handoff "<status>"` | Saves the handoff body from stdin, adds a step to the task, and tells the agent that restarts this one. Run by the agent itself. |
 | `herdr-crew restart <agent or T#>` | Sends `/exit`, waits for the pane to reach its shell, and starts the agent again from its saved brief. A `T#` restarts every agent of that task. |
+| `herdr-crew completion <bash\|zsh>` | Prints a shell completion script on stdout. |
+
+### Output style
+
+Result lines start with `crew:`, progress lines with `->`, and warnings with `warning:`. Colour is used only when stdout is a terminal, and `NO_COLOR` turns it off. Errors go to stderr, name the problem, and list the valid values or the next command to run. Long operations print a progress line for each agent they start, because an agent start can take minutes.
 
 ### Environment variables
 

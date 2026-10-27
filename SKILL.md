@@ -70,6 +70,8 @@ Then relay the command output to the user in one or two lines (tab label, agents
 
 Other commands: `herdr-crew status`, `herdr-crew close <T#> [<team>]` (closes the tab only, prints the worktree removal command, never removes it), `herdr-crew watch` (the lead runs it in Monitor: one line per board change), `herdr-crew handoff "<status>" < body` (an agent saves its handoff when it nears the context budget), `herdr-crew restart <agent|T#>` (starts an agent again from its handoff).
 
+`herdr-crew help` lists the commands, and `herdr-crew help <command>` shows one command's arguments, options and examples. Both work without tsk, herdr or jq on PATH. Result lines start with `crew:`, progress lines with `->`, and warnings with `warning:` on stderr.
+
 Context budget: Claude agents get a hook at 135000 tokens. OpenCode has no automatic crew context warning or asynchronous Monitor tool; its runtime brief specifies direct lookups, portable skills and bounded waits with explicit monitoring limits. Subagents are disabled under its native rank policy. Agents write a handoff before compaction; their initiator restarts them.
 
 If the output says "not inside Herdr", tell the user to start Herdr and rerun there.

@@ -162,18 +162,7 @@ cmd_configure() {
   local role agent model="" effort="" again found="" tool variants
   case "${1:-}" in
     --help|-h)
-      cat <<'HELP'
-usage: herdr-crew configure [--interactive | --show | ROLE AGENT [--model MODEL] [--effort EFFORT]]
-Saves .herdr-crew.json in the primary project checkout; worktrees share it.
-ROLE: all, lead, manager, member, inspector, or a job (driver, navigator, ...).
-AGENT: claude or opencode (OpenCode 2). Job settings override rank defaults.
-Use model/effort 'inherit' for the agent's default. OpenCode effort selects a
-variant supported by the explicit model. The wizard lists models and variants.
-Examples:
-  herdr-crew configure
-  herdr-crew configure driver opencode --model provider/model
-  herdr-crew configure --show
-HELP
+      usage_configure
       return ;;
   esac
   config_load

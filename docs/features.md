@@ -4,7 +4,7 @@ Checked against the scripts, team configurations, ranks, and personas on 2026-10
 
 ## Commands and options
 
-The launcher is [bin/crew](../bin/crew). Runtime commands require tsk, jq, and herdr on PATH. Configure only needs jq and the standard local utilities; it does not invoke Herdr/tsk or start agents. Other used utilities include Bash, Git, rg, shasum, readlink, awk, sed, and standard shell utilities. It has no separate help subcommand; missing or unknown commands print usage and fail.
+The launcher is [bin/crew](../bin/crew). Runtime commands require tsk, jq, and herdr on PATH. Configure only needs jq and the standard local utilities; it does not invoke Herdr/tsk or start agents. Other used utilities include Bash, Git, rg, shasum, readlink, awk, sed, and standard shell utilities. `help` and `--version` need none of the three runtimes, so they work on a bare machine. The terminal UX layer is [lib/ux.sh](../lib/ux.sh).
 
 | Command | Inputs and behavior |
 |---|---|
@@ -13,11 +13,29 @@ The launcher is [bin/crew](../bin/crew). Runtime commands require tsk, jq, and h
 | `team <team> <T#> [--persona <job>=<domain>[+<domain>]]... ["instructions"]` | Starts an existing task's team. Repeat `--persona` for different slots. Explicit instructions override task notes in the brief. With no instructions, reads task notes. |
 | `say <agent> "<message>"` | Sends to idle/done agents, or waits up to 20 seconds. If a task worker stays busy, appends a tagged message to its task. Lead/Manager names have no T number; when busy, their message can remain undelivered despite exit 0. Check the output. |
 | `mark <T#> <status> "<note>"` | Runs tsk status, appends the note as a step, and reports pane metadata. These are separate calls, not one atomic transaction. |
-| `status` | Prints open task JSON and states for Lead, Manager, and discovered task jobs. Completed tasks are normally excluded by tsk's default list. |
+| `status` | Prints one line per open task (T number, status, title) and one per known crew agent (name, state), tab separated. Completed tasks are normally excluded by tsk's default list. `status --json` prints the raw task list. |
 | `close <T#> [<team>]` | Closes matching tabs in the selected workspace. Without a team, matches the `T# ` label prefix. With a team, matches its exact label. Retains worktrees and prints removal commands for existing paths. |
 | `watch` | Polls open and done tasks, known crew agents, and handoff files. Prints status changes, blocked/done/disappeared agents, and new handoffs. A failed task read retains the prior snapshot. |
 | `handoff "<status>"` | Reads the multiline body from stdin, or uses the existing handoff file. Adds a task step when CREW_TASK exists and notifies the initiator. Does not terminate the agent itself. |
 | `restart <agent\|T#>` | Reads saved rank/job/pane/task/brief and resolved agent/model/effort. The original pane environment preserves OpenCode native session policy. Configuration edits apply only to new launches. Requests exit, waits up to 30 seconds for the pane's shell, then starts again. Adds an existing handoff pointer and archives the handoff after startup. A T number selects all saved agents of that task. |
+| `help [<command>]` | Prints the command list, or one command's arguments, options and examples. Same text as `<command> --help`. |
+| `completion <bash\|zsh>` | Prints a shell completion script on stdout. Unknown or missing shells fail. |
+| `--help`, `-h` | Global, before the command. Prints the command list and exits 0. |
+| `--version`, `-V` | Global, before the command. Prints `git describe` for the installation, or `dev`, and exits 0. |
+| `--dry-run` | Global, before the command. Same effect as `CREW_DRY_RUN=1`. |
+
+Global options must come before the command, so instructions can never be read as an option. `--help`, `--version` and `help` run before the tsk, herdr and jq checks, so they work on a machine that has none of them.
+
+## Output and help
+
+[lib/ux.sh](../lib/ux.sh) holds the terminal layer. It is sourced before the tsk, herdr and jq checks, so help and version never need them.
+
+- Result lines start with `crew:`, progress lines with `->`, warnings with `warning:` on stderr. Warnings never fail a command.
+- Colour is used only when stdout is a terminal, and `NO_COLOR` or `TERM=dumb` turns it off. Colour decorates the words; it never replaces them, and no message text changed.
+- Errors go to stderr, name the problem, and give the valid values or the next command: the team list for an unknown team, the ranks and personas for an unknown name, and the install hint for a missing runtime.
+- `start_agent` prints a progress line per agent, because an agent start can block for minutes.
+- `watch` handles Ctrl+C: it prints `crew: watch stopped` and exits 130.
+- `status` no longer prints the raw task JSON. Use `status --json` for that form.
 
 Spec forms are `lead`, `<rank>@<job>[+<domain>]`, or a bare job. `lead@<domain>` also uses the parser's domain composition. One job is allowed per spec, and its rank must match. Unknown names and invalid team persona slots fail before launch mutations. A fresh code-reviewer launch is refused because it lacks an existing pair branch.
 
@@ -75,6 +93,7 @@ These are configured job/instruction contracts. Fake launch tests prove composit
 | `CREW_DRY_RUN` | Any nonempty value prints mutating Herdr/tsk/Git calls and uses fixture JSON. Reads and dependency checks still run. Local metadata, briefs, handoffs, and archives can still be written; use disposable HOME for isolation. |
 | `CREW_CTX_LIMIT` | Context warning threshold, default 135000. The hook reads the worker environment. This variable is not one of the six exports explicitly forwarded/restored by the launcher; ensure the worker environment has a custom value. |
 | `CREW_WATCH_SECS` | Watch interval, default 20 seconds. Applies to the watch process. |
+| `NO_COLOR` | Any value turns off colour, like a non-terminal stdout. |
 | `CREW_WATCH_ONCE` | `1` runs two polls and exits; a test control. |
 | `HERDR_ENV`, `HERDR_WORKSPACE_ID` | Select the inherited workspace when inside Herdr. Otherwise the launcher finds or creates `crew-<slug>` on a running server. |
 | `HERDR_PANE_ID` | Caller pane for metadata updates. Herdr supplies it. |
@@ -110,6 +129,6 @@ It combines persona skills with all skill names in [skills.sources](../skills.so
 - [ADRs](adr/): historical decisions, including models, permissions, worktrees, communication, installation, AXI, lifecycle, hooks, and Q&A.
 - [Q&A plan](superpowers/plans/2026-10-14-project-qa.md): intended behavior, execution results, and remaining acceptance gaps.
 - [Test-concurrency research](research/test-concurrency.md): unimplemented proposal. No test-slot environment controls, `test`/`tests` subcommands, or semaphore are shipped.
-- [dry-run tests](../test/dry-run.sh): fake-tool launcher, prompt, hook, and restart checks. [worktree tests](../test/worktrees.sh): real-Git branch/worktree checks. Live answer evidence is recorded separately in STATE.
+- [dry-run tests](../test/dry-run.sh): fake-tool launcher, prompt, hook, restart, help/version/status/completion and dry-run-flag checks. [worktree tests](../test/worktrees.sh): real-Git branch/worktree checks. Live answer evidence is recorded separately in STATE.
 
 The feature inventory includes configured planning behavior; automated and live verification remain separately recorded in STATE.

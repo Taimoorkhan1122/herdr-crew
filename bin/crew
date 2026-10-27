@@ -5,13 +5,16 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 RANKS="lead manager member inspector"
-die() { echo "herdr-crew: $*" >&2; exit 1; }
+die() { printf '%sherdr-crew: %s%s\n' "$U_RED" "$*" "$U_OFF" >&2; exit 1; }
 # mut CMD...: mutating command (dry-run: echo only)
 mut() { if [[ -n "${CREW_DRY_RUN:-}" ]]; then echo "+ $*" >&2; else "$@"; fi; }
 # mutj FAKE_JSON CMD...: mutating command whose JSON stdout is needed
 mutj() { local fake=$1; shift; if [[ -n "${CREW_DRY_RUN:-}" ]]; then echo "+ $*" >&2; echo "$fake"; else "$@"; fi; }
 
-command -v jq >/dev/null || die "jq not found"
+# UX layer first: --help and --version work without tsk, herdr or jq.
+source "$ROOT/lib/ux.sh"
+
+command -v jq >/dev/null || die "jq not found on PATH (install: brew install jq)"
 
 # Repo and slug. Slug = 6 chars of the basename + 4 hex of the repo path, so same-named repos differ.
 # Panes crew creates carry CREW_* so worktree subshells keep the main repo's identity.
@@ -147,7 +150,7 @@ brief() {
   fi
   axi=$(axi_of "$(rank_file "$rank")" $(for p in $plist; do pfile "$p"; done))
   for a in $axi; do
-    command -v "$a" >/dev/null 2>&1 || echo "herdr-crew: warning: AXI tool '$a' not on PATH (run bin/install-skills)" >&2
+    command -v "$a" >/dev/null 2>&1 || crew_warn "AXI tool '$a' not on PATH (run bin/install-skills)"
   done
   [[ -z "$axi" ]] || axi_line="
 AXI tools (prefer these over raw CLIs; run with no args for a dashboard, follow help[] hints): $(echo $axi | sed 's/ /, /g')"
@@ -158,7 +161,7 @@ AXI tools (prefer these over raw CLIs; run with no args for a dashboard, follow 
         if [[ "$AGENT_KIND" == claude ]]; then skills="$skills /$s"; else skills="$skills $s"; fi ;;
       esac
       # plugin skills (ns:name) live elsewhere; only check user skills
-      [[ "$s" == *:* || -f "$HOME/.claude/skills/$s/SKILL.md" || -f "$HOME/.agents/skills/$s/SKILL.md" || -f "$HOME/.config/opencode/skills/$s/SKILL.md" || -f "$cwd/.agents/skills/$s/SKILL.md" ]] || echo "herdr-crew: warning: skill '$s' (persona $p) not installed" >&2
+      [[ "$s" == *:* || -f "$HOME/.claude/skills/$s/SKILL.md" || -f "$HOME/.agents/skills/$s/SKILL.md" || -f "$HOME/.config/opencode/skills/$s/SKILL.md" || -f "$cwd/.agents/skills/$s/SKILL.md" ]] || crew_warn "skill '$s' (persona $p) not installed"
     done
     bodies="$bodies
 Persona ($p):
@@ -194,7 +197,7 @@ target_ws() {
     if [[ -z "$WS" ]]; then
       WS=$(mutj '{"result":{"workspace":{"workspace_id":"w_dry"}}}' \
         herdr workspace create --label "crew-$SLUG" --cwd "$REPO" --no-focus | jq -r '.result.workspace.workspace_id')
-      echo "crew: created workspace crew-$SLUG (attach with: herdr)"
+      crew_out "created workspace crew-$SLUG (attach with: herdr)"
     fi
   else
     die "not inside Herdr and no server running. Start Herdr with: herdr   then rerun there"
@@ -217,7 +220,7 @@ submit() {
       break
     fi
   done
-  echo "herdr-crew: warning: $1 did not start working; check its pane" >&2
+  crew_warn "$1 did not start working; check its pane"
 }
 
 # start_agent NAME RANK PANE TASK BRIEF [JOB]: start agent in pane, then send brief
@@ -226,6 +229,7 @@ start_agent() {
   local name=$1 rank=$2 pane=$3 job=${6:-} kind args=() out text model effort settings env_hook
   if [[ -n "${7:-}" ]]; then AGENT_JSON=$7; selection_fields; else agent_selection "$rank" "$job"; fi
   kind=$AGENT_KIND; model=$AGENT_MODEL; effort=$AGENT_EFFORT
+  crew_step "starting $name ($kind${model:+, $model}${effort:+, $effort})"
   if [[ "$kind" == opencode ]]; then
     args=(--kind opencode -- --standalone)
   else
@@ -275,7 +279,7 @@ cmd_launch() {
   if [[ "$RANK" == lead ]]; then clear_stale_name "$SLUG-lead"; fi
   if [[ "$RANK" == lead ]] && herdr agent get "$SLUG-lead" >/dev/null 2>&1; then
     cmd_say "$SLUG-lead" "$instr"
-    echo "crew: $SLUG-lead already running, sent instructions to it"
+    crew_out "$SLUG-lead already running, sent instructions to it"
     return
   fi
 
@@ -304,7 +308,7 @@ cmd_launch() {
       "Wait for the lead to send you task numbers (T#) via herdr-crew say. Then spawn teams: herdr-crew team <team> <T#> [--persona <job>=<domain>]... Domain personas: $(persona_names). Never edit code." \
       "$REPO" "pragmatic-senior")"
     start_agent "$lead" lead "$root" "" "$(brief "$lead" lead "" "$manager" "$instr" "$REPO" "$(slot_list "" "$DOMAINS")")"
-    echo "crew: lead tab 'crew $SLUG' ready: $lead, $manager (board pane bottom-left)"
+    crew_out "lead tab 'crew $SLUG' ready: $lead, $manager (board pane bottom-left)"
     return
   fi
 
@@ -316,7 +320,7 @@ cmd_launch() {
   T="T$(jq -r '.number // empty' <<<"$out")"
   [[ "$T" != T ]] || die "tsk add returned no task number: $out"
   mut tsk status "$T" ready >/dev/null
-  echo "crew: created task $T"
+  crew_out "created task $T"
   if [[ -n "$DOMAINS" ]]; then
     cmd_team "$team" "$T" --persona "$JOB=${DOMAINS// /+}" "$instr"
   else
@@ -336,7 +340,7 @@ cmd_team() {
       *) instr=$1; shift ;;
     esac
   done
-  [[ -f "$ROOT/teams/$team.conf" ]] || die "no team '$team'"
+  [[ -f "$ROOT/teams/$team.conf" ]] || die "no team '$team'. teams: $(teams_list)"
   for e in $pmap; do
     doms=${e#*=}
     case " $(team_jobs "$team" | tr '\n' ' ')" in *" ${e%%=*} "*) ;; *) die "team '$team' has no job '${e%%=*}'. jobs: $(team_jobs "$team" | tr '\n' ' ')" ;; esac
@@ -394,7 +398,7 @@ cmd_team() {
     start_agent "$n" "${ranks[$i]}" "${panes[$i]}" "$T" "$(brief "$n" "${ranks[$i]}" "$T" "$mates" "$instr" "$cwd" \
       "$(slot_list "${jobs[$i]}" "$(pmap_for "${jobs[$i]}")")")" "${jobs[$i]}"
   done
-  echo "crew: team $team for $T in tab '$T $team' (agents: ${names[*]})"
+  crew_out "team $team for $T in tab '$T $team' (agents: ${names[*]})"
 }
 
 # cmd_say AGENT MSG: prompt it when idle or done. Otherwise wait at most 20s, then queue the message as a step
@@ -410,9 +414,9 @@ cmd_say() {
   if [[ "$to" =~ ^.*-t([0-9]+)- ]]; then task="T${BASH_REMATCH[1]}"; fi
   if [[ -n "$task" ]]; then
     mut tsk steps "$task" add "[msg from $ME to $to] $msg"
-    echo "crew: $to is $state, message queued on $task (it reads it from the task steps)"
+    crew_out "$to is $state, message queued on $task (it reads it from the task steps)"
   else
-    echo "crew: $to is $state and has no task; message NOT delivered, send it again later" >&2
+    crew_warn "$to is $state and has no task; message NOT delivered, send it again later"
   fi
   return 0
 }
@@ -428,10 +432,14 @@ cmd_mark() {
 show_agent() { local st; st=$(status_of "$1"); if [[ -n "$st" ]]; then printf '%s\t%s\n' "$1" "$st"; fi; }
 
 cmd_status() {
-  local rows n job name
+  local rows n st title job name
+  if [[ "${1:-}" == --json ]]; then tsk list -p "$REPO" --json; return 0; fi
   # herdr agent list has no names, so probe the names the crew would use
   rows=$(tsk list -p "$REPO" --json)
-  echo "$rows"
+  while IFS=$'\t' read -r n st title; do
+    [[ -n "$n" ]] || continue
+    printf 'T%s\t%s\t%s\n' "$n" "$st" "$title"
+  done < <(jq -r '.[] | [(.number|tostring),(.status // "?"),(.title // "")] | @tsv' <<<"$rows" 2>/dev/null || true)
   for name in "$SLUG-lead" "$SLUG-manager"; do show_agent "$name"; done
   for n in $(jq -r '.[].number // empty' <<<"$rows"); do
     for job in $(all_jobs); do show_agent "$(agent_name "T$n" "$job")"; done
@@ -440,14 +448,15 @@ cmd_status() {
 
 cmd_close() {
   local T=$1 TEAM=${2:-} label tabs tab d
+  [[ -n "${CREW_WS:-${HERDR_WORKSPACE_ID:-}}" ]] || die "no workspace known: run close inside Herdr, or set CREW_WS"
   label="$T ..."; [[ -z "$TEAM" ]] || label="$T $TEAM"
   # TEAM: exact tab label "T# TEAM". No TEAM: every tab starting with "T# "
-  tabs=$(herdr tab list --workspace "${CREW_WS:-${HERDR_WORKSPACE_ID:?}}" \
+  tabs=$(herdr tab list --workspace "${CREW_WS:-${HERDR_WORKSPACE_ID:-}}" \
     | jq -r --arg p "$T " --arg x "$TEAM" --arg l "$label" '.result.tabs[]
       | select(if $x == "" then ((.label // "") | startswith($p)) else (.label // "") == $l end) | .tab_id')
   [[ -n "$tabs" ]] || die "no tab labelled '$label'"
   for tab in $tabs; do mut herdr tab close "$tab"; done
-  echo "crew: closed $T tabs. Worktree kept. Remove only after you confirm:"
+  crew_out "closed $T tabs. Worktree kept. Remove only after you confirm:"
   if [[ -n "$TEAM" ]]; then
     d="$HOME/.herdr/worktrees/$SLUG/$T-$TEAM"
     [[ -e "$d" ]] && echo "  git -C $REPO worktree remove $d"
@@ -468,6 +477,7 @@ field_of() { awk -F'\t' -v k="$1" -v c="$2" '$1==k{print $c; exit}' <<<"$3"; }
 cmd_watch() {
   local secs=${CREW_WATCH_SECS:-20} polls=0 first=1 raw done_raw key st title old name new job names n f
   local tasks="" agents="" files="" p_tasks="" p_agents="" p_files=""
+  trap 'printf "\n"; crew_out "watch stopped"; exit 130' INT
   while :; do
     # a failed read keeps the last snapshot, so a bad poll prints nothing
     # the default list hides done tasks, so the done list is read too
@@ -531,7 +541,7 @@ cmd_handoff() {
   elif [[ "$ME" == "$SLUG-manager" ]]; then to="$SLUG-lead"
   else to="$SLUG-manager"; fi
   cmd_say "$to" "$ME hit the context limit. Handoff: $f. Restart it: herdr-crew restart $ME"
-  echo "crew: handoff saved to $f"
+  crew_out "handoff saved to $f"
 }
 
 # restart_one NAME: /exit the agent, wait for its pane to reach the shell, start it again from its saved meta and brief.
@@ -566,7 +576,7 @@ restart_one() {
   if [[ -f "$handoff" ]]; then brief="$brief"$'\n'"Resume from your handoff: $handoff. Read it first. The board and the handoff show work already done: do not redo it, and do not create tasks that already exist."; fi
   start_agent "$name" "$rank" "$pane" "$task" "$brief" "$job" "$selection"
   if [[ -f "$handoff" ]]; then mv "$handoff" "$SDIR/handoff-$name.$(date +%s).md"; fi
-  echo "crew: restarted $name"
+  crew_out "restarted $name"
 }
 
 # cmd_restart AGENT|T#: restart one agent, or every saved agent of a task
@@ -584,21 +594,46 @@ cmd_restart() {
 
 # Configuration is local and works without Herdr or tsk installed.
 source "$ROOT/lib/agent-config.sh"
+
+# Global options come before the command, so an instruction can never look like one.
+while (( $# )); do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    -V|--version) crew_version; exit 0 ;;
+    --dry-run) export CREW_DRY_RUN=1; shift ;;
+    *) break ;;
+  esac
+done
 sub=${1:-}; [[ $# -gt 0 ]] && shift
 if [[ "$sub" == configure ]]; then cmd_configure "$@"; exit; fi
-for c in tsk herdr; do command -v "$c" >/dev/null || die "$c not found (tsk: brew install smarzban/tap/tsk)"; done
+for c in tsk herdr; do command -v "$c" >/dev/null || die "$c not found on PATH (tsk: brew install smarzban/tap/tsk; herdr: install Herdr first)"; done
 case "$sub" in
   launch|team) config_load ;;
 esac
+# help_or CMD SHOW ARGS...: `<command> --help` prints that command's help and exits 0.
+help_or() {
+  local cmd=$1 show=$2; shift 2
+  if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then "$show"; exit 0; fi
+  "$cmd" "$@"
+}
 case "$sub" in
-  launch)  cmd_launch "$@" ;;
-  team)    cmd_team "$@" ;;
-  say)     cmd_say "$@" ;;
-  mark)    cmd_mark "$@" ;;
-  status)  cmd_status ;;
-  close)   cmd_close "$@" ;;
-  watch)   cmd_watch ;;
-  handoff) cmd_handoff "$@" ;;
-  restart) cmd_restart "$@" ;;
-  *) die "usage: herdr-crew {configure [--show | ROLE AGENT [--model MODEL] [--effort EFFORT]] | launch <spec> - | team <team> <T#> [--persona <job>=<domain>[+<domain>]]... | say <agent> <msg> | mark <T#> <status> <note> | status | close <T#> [<team>] | watch | handoff \"<status>\" < handoff text | restart <agent|T#>}. spec: <rank>[@<persona>[+<persona>]] or a job persona (driver, navigator, ...)" ;;
+  "") usage >&2; exit 1 ;;
+  help)
+    case "${1:-}" in
+      "") usage ;;
+      configure|launch|team|say|mark|status|close|watch|handoff|restart|completion) "usage_$1" ;;
+      *) die "unknown command '$1'. Run: herdr-crew help" ;;
+    esac
+    exit 0 ;;
+  launch)  help_or cmd_launch usage_launch "$@" ;;
+  team)    help_or cmd_team usage_team "$@" ;;
+  say)     help_or cmd_say usage_say "$@" ;;
+  mark)    help_or cmd_mark usage_mark "$@" ;;
+  status)  help_or cmd_status usage_status "$@" ;;
+  close)   help_or cmd_close usage_close "$@" ;;
+  watch)   help_or cmd_watch usage_watch "$@" ;;
+  handoff) help_or cmd_handoff usage_handoff "$@" ;;
+  restart) help_or cmd_restart usage_restart "$@" ;;
+  completion) help_or cmd_completion usage_completion "$@" ;;
+  *) usage >&2; die "unknown command '$sub'. Run: herdr-crew help" ;;
 esac
