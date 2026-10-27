@@ -300,6 +300,7 @@ out=$("$CREW" configure --show 2>&1) || rc=$?
 expect 'OpenCode effort without model is rejected without rewriting config' '[[ $rc != 0 && "$out" == *".herdr-crew.json"* ]]'
 printf '%s\n' '{"version":1,"roles":{"member":{"agent":"opencode","model":"opencode/deepseek-v4.1-flash-free","effort":"high"}}}' >.herdr-crew.json
 : >"$LOG"
+rc=0
 out=$("$CREW" configure --show 2>&1) || rc=$?
 expect 'OpenCode effort with explicit model validates' '[[ $rc == 0 ]]'
 rm .herdr-crew.json

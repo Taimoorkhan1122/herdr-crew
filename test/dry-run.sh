@@ -462,5 +462,82 @@ in_out "planning source: checks live repo" 'git -C "$CREW_REPO" status --short' 
 in_out "planning source: blocks stale draft" "source drift" "$planner_rules"
 in_out "planning source: checks before dispatch" "source drift" "$lead_rules"
 
+# 27. Command-line UX: help, version, global options, readable status, completions
+reset
+rc=0; out=$("$CREW" --help 2>&1) || rc=$?
+(( rc == 0 )) && pass "help: --help exits 0" || flunk "help: --help rc=$rc"
+for want in USAGE COMMANDS "GLOBAL OPTIONS" EXAMPLES configure restart completion; do
+  in_out "help: lists $want" "$want" "$out"
+done
+in_out "help: documents the global dry-run flag" "--dry-run" "$out"
+rc=0; out=$("$CREW" help 2>&1) || rc=$?
+(( rc == 0 )) && in_out "help: the help subcommand prints the same help" "GLOBAL OPTIONS" "$out" || flunk "help: help subcommand rc=$rc"
+for c in configure launch team say mark status close watch handoff restart completion; do
+  rc=0; out=$("$CREW" help "$c" 2>&1) || rc=$?
+  (( rc == 0 )) && in_out "help: help $c" "USAGE" "$out" || flunk "help: help $c rc=$rc"
+  rc=0; out=$("$CREW" "$c" --help 2>&1) || rc=$?
+  (( rc == 0 )) && in_out "help: $c --help" "USAGE" "$out" || flunk "help: $c --help rc=$rc"
+done
+rc=0; out=$("$CREW" --version 2>&1) || rc=$?
+(( rc == 0 )) && [[ -n "$out" ]] && pass "version: --version exits 0 ($out)" || flunk "version: --version rc=$rc"
+rc=0; out=$("$CREW" -V 2>&1) || rc=$?
+(( rc == 0 )) && pass "version: -V exits 0" || flunk "version: -V rc=$rc"
+# help and version must work on a machine with no tsk, herdr or jq at all.
+# A stub on PATH proves nothing, because `command -v` still succeeds and the
+# dependency check passes. This farm really lacks the three runtimes.
+NORUN="$TMP/norun"; mkdir -p "$NORUN"
+( IFS=:; for d in $PATH; do for f in "$d"/*; do b=${f##*/}; case "$b" in jq|tsk|herdr) ;; *) ln -s "$f" "$NORUN/$b" 2>/dev/null || true ;; esac; done; done )
+norun_ok=0
+for probe in jq tsk herdr; do PATH="$NORUN" command -v "$probe" >/dev/null || norun_ok=$((norun_ok + 1)); done
+(( norun_ok == 3 )) && pass "no-runtime farm: jq, tsk and herdr are absent" || flunk "no-runtime farm: a runtime is still present"
+for probe in "--help" "help" "help team" "launch --help" "configure --help"; do
+  rc=0; out=$(env PATH="$NORUN" "$CREW" $probe 2>&1) || rc=$?
+  (( rc == 0 )) && in_out "no-runtime: [$probe] prints help" "USAGE" "$out" || flunk "no-runtime: [$probe] rc=$rc, $out"
+done
+rc=0; out=$(env PATH="$NORUN" "$CREW" --version 2>&1) || rc=$?
+(( rc == 0 )) && [[ -n "$out" ]] && pass "no-runtime: --version works ($out)" || flunk "no-runtime: --version rc=$rc, $out"
+for shell in bash zsh; do
+  rc=0; out=$(env PATH="$NORUN" "$CREW" completion "$shell" 2>&1) || rc=$?
+  (( rc == 0 )) && in_out "no-runtime: completion $shell prints the script" "herdr-crew" "$out" || flunk "no-runtime: completion $shell rc=$rc, $out"
+done
+# a command that is not pure text still reports the missing runtime
+rc=0; out=$(env PATH="$NORUN" "$CREW" status 2>&1) || rc=$?
+(( rc != 0 )) && in_out "no-runtime: status still reports the missing jq" "jq not found" "$out" || flunk "no-runtime: status rc=$rc, $out"
+reset
+rc=0; out=$("$CREW" nope 2>&1) || rc=$?
+(( rc != 0 )) && in_out "unknown command: names it" "unknown command 'nope'" "$out" || flunk "unknown command: rc=$rc"
+in_out "unknown command: prints the help" "USAGE" "$out"
+rc=0; out=$("$CREW" 2>&1) || rc=$?
+(( rc == 1 )) && in_out "no command: prints the help and fails" "USAGE" "$out" || flunk "no command: rc=$rc"
+rc=0; out=$("$CREW" help nope 2>&1) || rc=$?
+(( rc != 0 )) && in_out "help: unknown command named" "unknown command 'nope'" "$out" || flunk "help: unknown command rc=$rc"
+
+# status: task rows and agent states, no raw JSON dump; --json keeps the machine form
+reset; printf '%s\n' review >"$STATE/tsk-seq"; echo working >"$STATE/$S-t7-driver"
+out=$("$CREW" status 2>&1)
+[[ "$out" != *'"number"'* ]] && pass "status: no raw JSON dump" || flunk "status: still dumps JSON"
+in_out "status: task row" "T7"$'\t'"review"$'\t'"fix the login bug" "$out"
+in_out "status: driver name and state" "$S-t7-driver"$'\t'"working" "$out"
+out=$("$CREW" status --json 2>&1)
+in_out "status --json: raw task JSON" '"number":7' "$out"
+
+# the global --dry-run flag matches CREW_DRY_RUN=1
+reset
+out=$(echo "dry run flag" | "$CREW" --dry-run launch driver - 2>&1)
+in_out "dry-run flag: prints the tsk call" "+ tsk add --title=dry run flag" "$out"
+in_out "dry-run flag: reports the task" "created task T1" "$out"
+in_out "dry-run flag: prints the agent start" "+ herdr agent start $S-t1-driver --pane" "$out"
+[[ $(cnt 'agent start') == 0 ]] && pass "dry-run flag: starts no agent" || flunk "dry-run flag: started an agent"
+
+# completions
+rc=0; out=$("$CREW" completion bash 2>&1) || rc=$?
+(( rc == 0 )) && in_out "completion: bash names the commands" "herdr-crew" "$out" || flunk "completion: bash rc=$rc"
+rc=0; out=$("$CREW" completion zsh 2>&1) || rc=$?
+(( rc == 0 )) && in_out "completion: zsh uses compdef" "#compdef" "$out" || flunk "completion: zsh rc=$rc"
+rc=0; out=$("$CREW" completion fish 2>&1) || rc=$?
+(( rc != 0 )) && pass "completion: unknown shell refused" || flunk "completion: accepted fish"
+rc=0; out=$("$CREW" completion 2>&1) || rc=$?
+(( rc != 0 )) && in_out "completion: missing shell refused" "completion <bash|zsh>" "$out" || flunk "completion: missing shell rc=$rc"
+
 echo
 if (( fails == 0 )); then echo "ALL PASS"; else echo "$fails FAILED"; exit 1; fi

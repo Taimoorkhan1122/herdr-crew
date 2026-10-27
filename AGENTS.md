@@ -27,11 +27,12 @@ These instructions govern maintenance of this repository. Runtime crew roles als
 For shell or launcher/configuration changes, run:
 
 ```bash
-for script in bin/crew bin/ctx-guard bin/install-skills test/dry-run.sh test/worktrees.sh; do
+for script in bin/crew bin/ctx-guard bin/install-skills lib/ux.sh lib/agent-config.sh test/dry-run.sh test/worktrees.sh; do
   /bin/bash -n "$script" || exit
 done
 /bin/bash test/dry-run.sh
 /bin/bash test/worktrees.sh
+/bin/bash test/agent-config.sh
 ```
 
 The first suite uses fake integrations. The second uses real Git in disposable repositories with fake Herdr/tsk. Neither proves live agent behavior. Run focused checks first; record direct exit codes and relevant output. For documentation-only changes, check references and consistency; avoid launching agents or rerunning runtime suites solely for prose edits.
