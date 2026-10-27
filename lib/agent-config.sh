@@ -215,7 +215,9 @@ $(opencode_guidance)" \
         {action:"edit",resource:"*",effect:"allow"},
         {action:"shell",resource:"*",effect:"allow"},
         {action:"shell",resource:"git push *",effect:"deny"},
-        {action:"shell",resource:"git merge *",effect:"deny"}]
+        {action:"shell",resource:"git merge *",effect:"deny"},
+        {action:"shell",resource:"git -C * push *",effect:"deny"},
+        {action:"shell",resource:"git -C * merge *",effect:"deny"}]
       else [{action:"external_directory",resource:"*",effect:"allow"}] + $shell_rules end)) as $permissions |
     {default_agent:"crew",agents:{crew:{mode:"primary",system:$system,permissions:$permissions}}} |
     if $model != "" then .model=$model | .agents.crew.model=$model else . end'

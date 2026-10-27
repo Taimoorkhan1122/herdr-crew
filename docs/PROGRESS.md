@@ -4,6 +4,8 @@ Newest entries first. Each entry gives the date and what changed.
 
 ## 2026-10-27
 
+- PR #2 Git policy review: sub-agent confirmed git -C push/merge bypass literal-prefix rules, added two explicit denies and behavioral policy regressions. Bare-command claim rejected because OpenCode trailing space-star matches commands without arguments. Six -C cases failed before fix (exit1); focused58 then passed (exit0), independently rerun by parent; launcher170, real-Git4, seven syntax/whitespace checks exit0. Tests model documented native matching; no live enforcement/model calls. Normal PR update being prepared; no merge/install.
+
 - PR #2 review follow-up: sub-agent validated PR Lens finding at d673e65 and strengthened the single agent-switch assertion to require member/opencode/default/default. Disposable mutation retaining haiku/high passed the old assertion and failed the new one; runtime files unchanged. Parent and sub-agent each ran focused42 checks exit0; launcher170, real-Git4, seven Bash syntax checks and whitespace exit0. No findings skipped. Normal PR-branch update is being prepared; no merge, live agent or installation.
 
 - User authorized feature commit, normal push and PR creation after local implementation/review completed. Preparing publication from feat/project-agent-config; merge, installation, live acceptance and cleanup remain outside scope. Remote main still matches base 865135a and no PR already exists for this head at preflight. The completion receipt is kept in the main coordinating checkpoint and feature ledger.

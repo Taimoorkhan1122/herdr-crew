@@ -176,7 +176,24 @@ expect 'mixed team launches configured driver with standalone OpenCode' '[[ $rc 
 expect 'unconfigured navigator keeps Claude native rank settings' 'jq -se '\''any(.[]; .[0:3] == ["agent","start","config-fixture-t7-navigator"] and (index("crew-inspector") != null) and (index("--settings") != null))'\'' "$LOG" >/dev/null'
 policy=$(jq -rs '[.[][] | select(type == "string") | select(startswith("OPENCODE_CONFIG_CONTENT=")) | sub("^OPENCODE_CONFIG_CONTENT=";"") | fromjson][0] // {}' "$LOG")
 expect 'OpenCode receives provider model and member native edit permission' 'jq -e '\''.model == "provider/model" and (.agents.crew.permissions|length > 0) and any(.agents.crew.permissions[]?; .action == "edit" and .effect == "allow")'\'' <<<"$policy" >/dev/null'
-expect 'member policy explicitly denies Git push and merge' 'jq -e '\''any(.agents.crew.permissions[]?; .action == "shell" and .resource == "git push *" and .effect == "deny") and any(.agents.crew.permissions[]?; .action == "shell" and .resource == "git merge *" and .effect == "deny")'\'' <<<"$policy" >/dev/null'
+# Model the documented whole-value wildcards, trailing " *" bare-command match,
+# and last-match precedence: https://opencode.ai/v2/docs/permissions/#matching
+shell_effect() {
+  local command=$1 action resource effect result=ask
+  while IFS=$'\t' read -r action resource effect; do
+    [[ $action == shell || $action == '*' ]] || continue
+    if [[ $command == $resource || ( $resource == *' *' && $command == ${resource% \*} ) ]]; then result=$effect; fi
+  done < <(jq -r '.agents.crew.permissions[] | [.action,.resource,.effect] | @tsv' <<<"$policy")
+  printf '%s\n' "$result"
+}
+for command in 'git push' 'git push origin branch' 'git merge' 'git merge branch' \
+  'git -C repo push' 'git -C repo push origin branch' 'git -C repo merge' 'git -C repo merge branch' \
+  'git -C "project with spaces" push origin branch' 'git -C "project with spaces" merge'; do
+  expect "member policy denies: $command" '[[ $(shell_effect "$command") == deny ]]'
+done
+for command in 'git status' 'git diff --stat' 'git -C repo status' 'git -C repo diff' 'git add file' 'git commit -m change' 'printf hello'; do
+  expect "member policy allows: $command" '[[ $(shell_effect "$command") == allow ]]'
+done
 expect 'OpenCode brief includes native role guidance without claiming a context hook' 'jq -se '\''any(.[]; .[0:3] == ["agent","prompt","config-fixture-t7-driver"] and (.[3]|contains("OpenCode runtime")) and (.[3]|contains("A hook warns you")|not))'\'' "$LOG" >/dev/null'
 run driver claude --model changed
 : >"$LOG"

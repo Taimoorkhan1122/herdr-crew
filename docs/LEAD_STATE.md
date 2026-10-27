@@ -1,16 +1,17 @@
 # Lead state and session checkpoint
 
-## Active checkpoint: PR #2 assertion review
+## Active checkpoint: PR #2 Git permission review
 
-Updated: 2026-10-27 12:14  (Asia/Karachi).
+Updated: 2026-10-27 12:20 PKT (Asia/Karachi).
 
-- Objective/approval: user requested validation of PR Lens finding at d673e65, followed by a sub-agent fix if valid. Prior normal PR-branch push authorization remains active; no merge, installation, cleanup or live acceptance authorized.
-- Repository: feat/project-agent-config in .superpowers/worktrees/agent-config, HEAD d673e651d7b36c9e9ceee07f628af4d89bbb36ff before follow-up commit. PR #2: https://github.com/Taimoorkhan1122/herdr-crew/pull/2. Follow-up edits: test/agent-config.sh and these state/progress/checkpoint records. Preserve main's four pre-existing unstaged files and empty index.
-- Validation/fix: sub-agent pr_lens_assertion confirmed the old check only required opencode anywhere. One assertion now requires the exact member/opencode/default/default row, using Bash builtins. No runtime change or dependency.
-- Evidence: disposable resolver mutation retained haiku/high; old named assertion passed, strengthened assertion failed (suite exits 1 with nine versus ten failures). Production resolver unchanged. Fresh focused42, hermetic launcher170 and real-Git4 checks exit0; seven individual Bash syntax checks and whitespace exit0. Parent independently reran focused suite and inspected mutation logs. Logs are local temporary evidence, not a live-agent test.
-- Work in hand: parent owns final commit/normal push and exact remote verification; sub-agent finished. Canonical list: pr2-lens-assertion. Publication receipt belongs in main coordinating checkpoint and ignored feature ledger. No live resources started.
-- Limits: live native enforcement/model availability/lifecycle remain unverified; unsupported runtimes and historical handoff race remain parked. No findings skipped or runtime fixes needed.
-- Next: inspect git diff/status, commit the four named follow-up files and push feat/project-agent-config normally; verify remote hash and PR identity. Preserve worktree; await explicit merge or live-acceptance instructions.
+- Objective/approval: user requested validation first, then sub-agent fixes for PR Lens Git deny finding at d673e65. Prior normal PR-branch push authorization remains active; no merge, installation, cleanup or live acceptance authorized.
+- Repository: feat/project-agent-config in .superpowers/worktrees/agent-config; HEAD d091b5f8badcf0cf9c8e4314b94d601c31603874 before follow-up commit. PR #2: https://github.com/Taimoorkhan1122/herdr-crew/pull/2. Edits: lib/agent-config.sh, test/agent-config.sh and checkpoint/state/progress docs. Preserve main's four existing unstaged files and empty index.
+- Validation: sub-agent pr_lens_git_policy confirmed git -C forms miss current literal-prefix rules. Bare-command claim rejected: OpenCode documents trailing space-star also matches the command without arguments. Official source: https://opencode.ai/v2/docs/permissions/#matching.
+- Fix: retain direct push/merge denies; add two explicit git -C push/merge wildcard denies after broad shell allow. Regression evaluates generated last-match policy, covering ten denied forms (including quoted paths) and seven allowed controls. No new dependencies or Claude policy changes.
+- Evidence: new regressions failed for six -C forms before fix (exit1); focused58 then pass (exit0), independently rerun by parent. Launcher170, real-Git4, seven individual Bash syntax checks and whitespace pass (exit0). Native OpenCode enforcement was not executed; fixture models documented matching only. Local version query hit filesystem EPERM opening user log; no elevation/retry or model call needed.
+- Work in hand: sub-agent complete; parent owns final commit/normal push and exact remote verification. Canonical list pr2-git-policy. Final publication receipt belongs in main checkpoint and ignored feature ledger. No live resources.
+- Limits: targeted shell patterns are native tool policy, not a universal shell sandbox; arbitrary wrappers/aliases remain outside this fix. Live policy/lifecycle/model acceptance and historical handoff race remain parked.
+- Next: inspect diff/status, commit named fix/docs and push feat/project-agent-config normally, then verify remote hash and PR identity. Preserve worktree; await explicit merge/live-acceptance instructions.
 
 ## Historical checkpoint retained below
 

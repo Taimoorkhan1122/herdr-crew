@@ -4,6 +4,8 @@ Status as of 2026-10-14. Crew launch and project Q&A have live scratch-repo evid
 
 ## Per-project agent configuration (2026-10-27)
 
+- PR #2 Git policy follow-up: explicit git -C push/merge denies supplement direct-command rules; bare forms already match OpenCode trailing space-star semantics. Six new failures before fix, then focused58 checks exit0; launcher170, real-Git4 and seven syntax/whitespace checks exit0. Regression evaluates generated policy against documented matching; installed native enforcement remains untested. These command patterns do not constitute a universal shell sandbox.
+
 - PR #2 review follow-up: the agent-switch test now checks the exact member/opencode/default/default row. A disposable resolver mutation preserving haiku/high passed the old assertion and failed the strengthened one. Fresh focused42, launcher170 and real-Git4 checks pass, exit0; runtime code is unchanged.
 
 - Added `.herdr-crew.json` with rank defaults/job overrides, a human configure wizard, argument-based assignments and resolved `--show` output. Configuration belongs to the primary project checkout and is shared with worker worktrees, including uncommitted edits. Optional user-wide defaults are deferred.
