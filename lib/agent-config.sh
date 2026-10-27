@@ -1,4 +1,5 @@
 # Sourced by bin/crew. Project configuration is JSON data, never executable shell.
+OPENCODE_CATALOG=""
 config_load() {
   local entry common gitdir
   CONFIG_ROOT=$REPO
@@ -40,10 +41,11 @@ config_validate() {
         (.agent == "claude" or (if has("model") and .model != "inherit" then
           .model|test("^[^/#]+/[^#]+$") else true end)) and
         (if has("effort") then
-          (.effort as $e | ["inherit","low","medium","high","xhigh","max"]|index($e)) != null and
-          (.agent == "claude" or .effort == "inherit")
+          if .agent == "claude" then
+            (.effort as $e | ["inherit","low","medium","high","xhigh","max"]|index($e)) != null
+          else (.effort | text and (contains("#")|not)) end
          else true end))))
-  ' <<<"$1" >/dev/null 2>&1 || die "invalid agent configuration in $CONFIG_FILE (version 1; known roles; agent claude/opencode; optional string model and Claude effort; OpenCode model must be provider/model without variants). Run: herdr-crew configure --help"
+  ' <<<"$1" >/dev/null 2>&1 || die "invalid agent configuration in $CONFIG_FILE (version 1; known roles; agent claude/opencode; optional model and effort; OpenCode model must be provider/model, with its variant in effort). Run: herdr-crew configure --help"
 }
 
 # agent_selection RANK JOB: sets AGENT_KIND/MODEL/EFFORT and a JSON snapshot.
@@ -59,7 +61,9 @@ agent_selection() {
   AGENT_JSON=$(jq -nc --argjson config "$AGENT_CONFIG" --arg rank "$rank" --arg job "$job" \
     --arg agent "$kind" --arg model "$model" --arg effort "$effort" '
     def overlay($next): if $next == null then . else
-      (if .agent != $next.agent then {agent:$next.agent,model:"",effort:""} else . end) * $next end;
+      (if .agent != $next.agent then {agent:$next.agent,model:"",effort:""}
+       elif .agent == "opencode" and $next.model != null and .model != $next.model then .effort=""
+       else . end) * $next end;
     {agent:$agent,model:$model,effort:$effort} | overlay($config.roles[$rank]) |
     overlay($config.roles[$job]) | .model = (if .model == "inherit" then "" else .model end) |
     .effort = (if .effort == "inherit" then "" else .effort end)')
@@ -88,8 +92,15 @@ config_show() {
 }
 
 config_set() {
-  local role=$1 agent=$2 model=$3 effort=$4 value
+  local role=$1 agent=$2 model=$3 effort=$4 value variants
   [[ "$role" == all || " $RANKS $(all_jobs | tr '\n' ' ') " == *" $role "* ]] || die "unknown role '$role'; use a rank ($RANKS) or job (driver, navigator, planner, ...)"
+  if [[ "$agent" == opencode && -n "$effort" && "$effort" != inherit ]]; then
+    [[ -n "$model" && "$model" != inherit ]] || die "OpenCode effort requires an explicit --model provider/model"
+    opencode_catalog
+    variants=$(jq -c --arg model "$model" '[.[] | select(.model == $model) | .variants[]]' <<<"$OPENCODE_CATALOG")
+    jq -e --arg effort "$effort" 'index($effort) != null' <<<"$variants" >/dev/null ||
+      die "unsupported OpenCode effort '$effort' for $model; supported: $(jq -r 'join(", ")' <<<"$variants"); use inherit for the model default"
+  fi
   value=$(jq -nc --arg agent "$agent" --arg model "$model" --arg effort "$effort" \
     '{agent:$agent} + (if $model != "" then {model:$model} else {} end) + (if $effort != "" then {effort:$effort} else {} end)')
   if [[ "$role" == all ]]; then
@@ -109,8 +120,45 @@ config_save() (
   mv -f "$tmp" "$CONFIG_FILE"
 )
 
+# The private metadata request creates no session and submits no model prompt.
+opencode_catalog() {
+  local response
+  [[ -z "$OPENCODE_CATALOG" ]] || return 0
+  response=$(cd "$CONFIG_ROOT" && opencode api --standalone model.list 2>/dev/null) ||
+    die "cannot read OpenCode model catalog; check opencode authentication/configuration, then retry"
+  OPENCODE_CATALOG=$(jq -ce '
+    def text: type == "string" and length > 0 and (test("[\\x00-\\x1f\\x7f#]")|not);
+    if (.data|type) != "array" then error("missing catalog") else
+      [.data[] | select(.enabled != false) |
+       if (.providerID|text) and (.id|text) and ((.variants // [])|type == "array") and
+          all((.variants // [])[]; .id|text) then
+         {model:(.providerID + "/" + .id),variants:[(.variants // [])[] | .id]}
+       else error("invalid catalog model") end] | sort_by(.model) end
+  ' <<<"$response") || die "invalid OpenCode model catalog; no changes saved"
+}
+
+# Number, exact value, or a search term; blank/0 keeps the runtime default.
+config_choose() {
+  local label=$1 choices=$2 matches=$2 answer count
+  while :; do
+    printf '%s\n' "$label choices (0: inherit):"
+    jq -r 'to_entries[] | "  \(.key + 1)) \(.value)"' <<<"$matches"
+    read -r -p "$label [inherit, number, or search]: " answer || die "configuration cancelled; no changes saved"
+    case "$answer" in ""|0|inherit) CONFIG_CHOICE=inherit; return ;; esac
+    count=$(jq length <<<"$matches")
+    if [[ "$answer" =~ ^[1-9][0-9]{0,5}$ ]] && (( answer <= count )); then
+      CONFIG_CHOICE=$(jq -r --argjson index "$((answer - 1))" '.[$index]' <<<"$matches"); return
+    fi
+    if jq -e --arg answer "$answer" 'index($answer) != null' <<<"$choices" >/dev/null; then
+      CONFIG_CHOICE=$answer; return
+    fi
+    matches=$(jq -c --arg search "$answer" '[.[] | select(ascii_downcase | contains($search|ascii_downcase))]' <<<"$choices")
+    [[ "$matches" != '[]' ]] || { printf 'No matching %s; try another search.\n' "$label"; matches=$choices; }
+  done
+}
+
 cmd_configure() {
-  local role agent model="" effort="" again found="" tool
+  local role agent model="" effort="" again found="" tool variants
   case "${1:-}" in
     --help|-h)
       cat <<'HELP'
@@ -118,7 +166,8 @@ usage: herdr-crew configure [--interactive | --show | ROLE AGENT [--model MODEL]
 Saves .herdr-crew.json in the primary project checkout; worktrees share it.
 ROLE: all, lead, manager, member, inspector, or a job (driver, navigator, ...).
 AGENT: claude or opencode (OpenCode 2). Job settings override rank defaults.
-Use model/effort 'inherit' for the agent's default. OpenCode effort is not supported.
+Use model/effort 'inherit' for the agent's default. OpenCode effort selects a
+variant supported by the explicit model. The wizard lists models and variants.
 Examples:
   herdr-crew configure
   herdr-crew configure driver opencode --model provider/model
@@ -143,8 +192,18 @@ HELP
       read -r -p 'Agent [claude]: ' agent || die "configuration cancelled; no changes saved"
       agent=${agent:-claude}
       command -v "$agent" >/dev/null || die "$agent not found on PATH; no changes saved"
-      read -r -p 'Model [inherit]: ' model || die "configuration cancelled; no changes saved"
-      read -r -p 'Effort [inherit]: ' effort || die "configuration cancelled; no changes saved"
+      if [[ "$agent" == opencode ]]; then
+        opencode_catalog
+        config_choose Model "$(jq -c '[.[].model]' <<<"$OPENCODE_CATALOG")"; model=$CONFIG_CHOICE
+        effort=inherit
+        variants=$(jq -c --arg model "$model" '[.[] | select(.model == $model) | .variants[]]' <<<"$OPENCODE_CATALOG")
+        if [[ "$variants" != '[]' ]]; then
+          config_choose Effort "$variants"; effort=$CONFIG_CHOICE
+        else printf 'Using model default effort (no selectable variants).\n'; fi
+      else
+        read -r -p 'Model [inherit]: ' model || die "configuration cancelled; no changes saved"
+        read -r -p 'Effort [inherit]: ' effort || die "configuration cancelled; no changes saved"
+      fi
       config_set "$role" "$agent" "${model:-inherit}" "${effort:-inherit}"
       read -r -p 'Configure another role? [y/N]: ' again || die "configuration cancelled; no changes saved"
       [[ "$again" == y || "$again" == Y ]] || break
@@ -176,7 +235,7 @@ agent_check() {
   command -v "$AGENT_KIND" >/dev/null || die "$AGENT_KIND not found on PATH; install it or run herdr-crew configure"
   if [[ "$AGENT_KIND" == opencode ]]; then
     [[ -z "$AGENT_MODEL" || "$AGENT_MODEL" =~ ^[^/#]+/[^#]+$ ]] || die "OpenCode model must be provider/model without variants"
-    [[ -z "$AGENT_EFFORT" ]] || die "OpenCode effort is not supported; remove the effort setting or use inherit"
+    [[ -z "$AGENT_EFFORT" || -n "$AGENT_MODEL" ]] || die "OpenCode effort requires an explicit model"
     version=$(opencode --version 2>/dev/null) || die "cannot check OpenCode version; OpenCode 2 is required"
     [[ "$version" =~ (^|[[:space:]])2\.[0-9]+\. ]] || die "OpenCode 2 is required for native crew permissions (found: $version)"
   fi
@@ -203,7 +262,7 @@ GUIDANCE
 opencode_config() {
   local rank=$1 shell_rules
   shell_rules=$(fm tools "$(rank_file "$rank")" | jq -Rc '[scan("Bash\\(([^)]+)\\)") | .[0] | {action:"shell",resource:.,effect:"allow"}]')
-  jq -nc --arg rank "$rank" --arg model "$AGENT_MODEL" --arg system "$(body "$(rank_file "$rank")")
+  jq -nc --arg rank "$rank" --arg model "$AGENT_MODEL" --arg effort "$AGENT_EFFORT" --arg system "$(body "$(rank_file "$rank")")
 
 $(opencode_guidance)" \
     --argjson shell_rules "$shell_rules" '
@@ -220,5 +279,5 @@ $(opencode_guidance)" \
         {action:"shell",resource:"git -C * merge *",effect:"deny"}]
       else [{action:"external_directory",resource:"*",effect:"allow"}] + $shell_rules end)) as $permissions |
     {default_agent:"crew",agents:{crew:{mode:"primary",system:$system,permissions:$permissions}}} |
-    if $model != "" then .model=$model | .agents.crew.model=$model else . end'
+    if $model != "" then .model=$model | .agents.crew.model=($model + (if $effort != "" then "#" + $effort else "" end)) else . end'
 }

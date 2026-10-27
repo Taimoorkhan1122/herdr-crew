@@ -4,7 +4,7 @@ description: Launch an agent crew in Herdr for development or project questions.
 allowed-tools: Bash(herdr-crew *)
 ---
 
-When asked to configure the project's agents, run `herdr-crew configure --show` first, then use `herdr-crew configure <rank-or-job> <claude|opencode> [--model MODEL] [--effort EFFORT]` with the user's requested assignments. `all` sets rank defaults while preserving job overrides. The human wizard is `herdr-crew configure`; agents use arguments instead of an interactive prompt. Settings are in the main project's `.herdr-crew.json`, shared across its worktrees. Unsupported agents fail explicitly. OpenCode requires version 2 and has no separate effort or model-variant setting. Existing sessions retain saved selections on restart.
+When asked to configure the project's agents, run `herdr-crew configure --show` first, then use `herdr-crew configure <rank-or-job> <claude|opencode> [--model MODEL] [--effort EFFORT]` with the user's requested assignments. `all` sets rank defaults while preserving job overrides. The human wizard is `herdr-crew configure`; agents use arguments instead of an interactive prompt. Settings are in the main project's `.herdr-crew.json`, shared across its worktrees. Unsupported agents fail explicitly. OpenCode requires version 2. For OpenCode effort, supply an explicit `--model` and a variant supported by its project catalog; `--effort inherit` uses the model default. The human wizard lists available models and their variants. Catalog lookup uses a private metadata server without creating an agent session or submitting a prompt. Existing sessions retain saved selections on restart.
 
 Run the launcher. Pass the instructions on stdin so quoting never breaks:
 
