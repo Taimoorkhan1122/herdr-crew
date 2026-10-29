@@ -5,66 +5,78 @@
 
 crew_tty=0
 if [[ -t 1 && -z "${NO_COLOR:-}" && "${TERM:-dumb}" != dumb ]]; then crew_tty=1; fi
-U_RED="" U_GRN="" U_YEL="" U_BLU="" U_CYN="" U_DIM="" U_BLD="" U_OFF=""
+U_RED="" U_GRN="" U_YEL="" U_BLU="" U_CYN="" U_MAG="" U_DIM="" U_BLD="" U_UNDER="" U_OFF=""
+U_OK="" U_INFO="" U_WARN="" U_ERR="" U_ARROW="" U_BULLET=""
 if (( crew_tty )); then
   U_RED=$'\033[31m'; U_GRN=$'\033[32m'; U_YEL=$'\033[33m'; U_BLU=$'\033[34m'
-  U_CYN=$'\033[36m'; U_DIM=$'\033[2m'; U_BLD=$'\033[1m'; U_OFF=$'\033[0m'
+  U_MAG=$'\033[35m'; U_CYN=$'\033[36m'; U_DIM=$'\033[2m'; U_BLD=$'\033[1m'; U_UNDER=$'\033[4m'; U_OFF=$'\033[0m'
+  U_OK="${U_GRN}✓${U_OFF}"; U_INFO="${U_CYN}ℹ${U_OFF}"; U_WARN="${U_YEL}⚠${U_OFF}"; U_ERR="${U_RED}✗${U_OFF}"; U_ARROW="${U_CYN}→${U_OFF}"; U_BULLET="${U_DIM}•${U_OFF}"
+else
+  U_OK="✓"; U_INFO="ℹ"; U_WARN="⚠"; U_ERR="✗"; U_ARROW="->"; U_BULLET="•"
 fi
 
 # crew_out TEXT: the standard result line. Only "crew:" is coloured.
 crew_out() { printf '%screw:%s %s\n' "$U_BLU" "$U_OFF" "$*"; }
 # crew_step TEXT: progress line for a long operation (an agent start can take minutes).
-crew_step() { printf '%s->%s %s\n' "$U_CYN" "$U_OFF" "$*"; }
+crew_step() { printf '%s%s%s %s\n' "$U_CYN" "$U_ARROW" "$U_OFF" "$*"; }
+# crew_info TEXT: informational message
+crew_info() { printf '%s %s\n' "$U_INFO" "$*"; }
+# crew_ok TEXT: success message
+crew_ok() { printf '%s %s\n' "$U_OK" "$*"; }
 # crew_warn TEXT: warning on stderr; never fails the command.
-crew_warn() { printf '%swarning:%s %s\n' "$U_YEL" "$U_OFF" "$*" >&2; }
+crew_warn() { printf '%s %swarning:%s %s\n' "$U_WARN" "$U_YEL" "$U_OFF" "$*" >&2; }
+# crew_err TEXT: error on stderr
+crew_err() { printf '%s %serror:%s %s\n' "$U_ERR" "$U_RED" "$U_OFF" "$*" >&2; }
 
 teams_list() { ls "$ROOT/teams" 2>/dev/null | sed 's/\.conf$//' | xargs echo; }
 crew_version() { git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || printf 'dev\n'; }
 
 usage() {
   cat <<EOF
-${U_BLD}herdr-crew${U_OFF} - deterministic crew launcher for Herdr
+${U_BLD}${U_CYN}herdr-crew${U_OFF} - deterministic crew launcher for Herdr
 
-USAGE
-  herdr-crew <command> [arguments]
-  herdr-crew help <command>
+${U_BLD}USAGE${U_OFF}
+  ${U_DIM}\$${U_OFF} herdr-crew <command> [arguments]
+  ${U_DIM}\$${U_OFF} herdr-crew help <command>
 
-COMMANDS
-  configure   Set the agent, model and effort of each rank and job
-  launch      Start a crew, or a job persona with a new task and its team
-  team        Start the team of an existing task
-  say         Send a message to a running agent
-  mark        Record a task status change and a note
-  status      Show task states and crew agent states
-  close       Close a task's tabs (worktrees are kept)
-  watch       Print one line per board change (the lead's Monitor feed)
-  handoff     Save a handoff file and tell the initiator
-  restart     Start an agent again from its saved brief and handoff
-  completion  Print a shell completion script
-  help        Show this help, or the help of one command
+${U_BLD}COMMANDS${U_OFF}
+  ${U_BLU}configure${U_OFF}   Set the agent, model and effort of each rank and job
+  ${U_BLU}launch${U_OFF}      Start a crew, or a job persona with a new task and its team
+  ${U_BLU}team${U_OFF}        Start the team of an existing task
+  ${U_BLU}say${U_OFF}         Send a message to a running agent
+  ${U_BLU}mark${U_OFF}        Record a task status change and a note
+  ${U_BLU}status${U_OFF}      Show task states and crew agent states
+  ${U_BLU}close${U_OFF}       Close a task's tabs (worktrees are kept)
+  ${U_BLU}watch${U_OFF}       Print one line per board change (the lead's Monitor feed)
+  ${U_BLU}handoff${U_OFF}     Save a handoff file and tell the initiator
+  ${U_BLU}restart${U_OFF}     Start an agent again from its saved brief and handoff
+  ${U_BLU}completion${U_OFF}  Print a shell completion script
+  ${U_BLU}help${U_OFF}        Show this help, or the help of one command
 
-GLOBAL OPTIONS
-  -h, --help       Show this help and exit
-  -V, --version    Show the version and exit
-      --dry-run    Print every mutating herdr, tsk and git call instead of running it
+${U_BLD}GLOBAL OPTIONS${U_OFF}
+  ${U_GRN}-h${U_OFF}, ${U_GRN}--help${U_OFF}       Show this help and exit
+  ${U_GRN}-V${U_OFF}, ${U_GRN}--version${U_OFF}    Show the version and exit
+      ${U_GRN}--dry-run${U_OFF}    Print every mutating herdr, tsk and git call instead of running it
 
-  Global options come before the command, so instructions can never look like one.
-  CREW_DRY_RUN=1 in the environment does the same as --dry-run.
+  ${U_DIM}Global options come before the command, so instructions can never look like one.
+  CREW_DRY_RUN=1 in the environment does the same as --dry-run.${U_OFF}
 
-TEAMS
+${U_BLD}TEAMS${U_OFF}
   $(teams_list)
 
-EXAMPLES
+${U_BLD}EXAMPLES${U_OFF}
+  ${U_DIM}# Start a lead crew${U_OFF}
   herdr-crew launch lead - <<'EOF'
   Build the login page
   EOF
+
   herdr-crew launch member@driver+nestjs-expert -
   herdr-crew team pair T7 --persona navigator=security-paranoid
   herdr-crew status
   herdr-crew launch driver --help
 
-Run 'herdr-crew help <command>' for the arguments and options of one command.
-Docs: docs/features.md in the herdr-crew installation.
+${U_DIM}Run 'herdr-crew help <command>' for the arguments and options of one command.${U_OFF}
+${U_DIM}Docs: docs/features.md in the herdr-crew installation.${U_OFF}
 EOF
 }
 
@@ -98,28 +110,30 @@ EOF
 
 usage_launch() {
   cat <<EOF
-USAGE
+${U_BLD}USAGE${U_OFF}
   herdr-crew launch <spec> [instructions...]
   herdr-crew launch <spec> -
 
-ARGUMENTS
-  <spec>            lead | <rank>@<job>[+<domain>] | <job>
+${U_BLD}ARGUMENTS${U_OFF}
+  ${U_GRN}<spec>${U_OFF}            lead | <rank>@<job>[+<domain>] | <job>
                     ranks: $RANKS
                     jobs and domains: $(persona_names)
-  instructions...   The work for the agent. One job persona per spec.
-  -                 Read the instructions from stdin. Use it when the text holds
+  ${U_GRN}instructions...${U_OFF}   The work for the agent. One job persona per spec.
+  ${U_GRN}-${U_OFF}                 Read the instructions from stdin. Use it when the text holds
                     quotes, newlines or shell characters.
 
-DESCRIPTION
+${U_BLD}DESCRIPTION${U_OFF}
   lead starts the Lead, the Manager and the board pane. A job persona creates a
   ready task and starts its configured team. Re-running lead sends the new
   instructions to the running lead instead of starting a second crew.
   Invalid input fails before any task, workspace or agent is created.
 
-EXAMPLES
+${U_BLD}EXAMPLES${U_OFF}
+  ${U_DIM}# Start lead crew${U_OFF}
   herdr-crew launch lead - <<'EOF'
   Build the login page
   EOF
+
   herdr-crew launch member@driver+nestjs-expert -
   herdr-crew launch inspector - "Is there a race in bin/crew?"
 EOF
