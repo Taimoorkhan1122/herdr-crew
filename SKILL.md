@@ -4,7 +4,9 @@ description: Launch an agent crew in Herdr for development or project questions.
 allowed-tools: Bash(herdr-crew *)
 ---
 
-When asked to configure the project's agents, run `herdr-crew configure --show` first, then use `herdr-crew configure <rank-or-job> <claude|opencode> [--model MODEL] [--effort EFFORT]` with the user's requested assignments. `all` sets rank defaults while preserving job overrides. The human wizard is `herdr-crew configure`; agents use arguments instead of an interactive prompt. Settings are in the main project's `.herdr-crew.json`, shared across its worktrees. Unsupported agents fail explicitly. OpenCode requires version 2. For OpenCode effort, supply an explicit `--model` and a variant supported by its project catalog; `--effort inherit` uses the model default. The human wizard lists available models and their variants. Catalog lookup uses a private metadata server without creating an agent session or submitting a prompt. Existing sessions retain saved selections on restart.
+The first `launch` or `team` initializes the primary project's `.herdr-crew/` baseline automatically. To initialize without launching agents, run `herdr-crew init`. Initialization preserves existing files and imports valid `.herdr-crew.json` assignments into `.herdr-crew/config.json` while retaining the legacy file. Use `herdr-crew upgrade` to preview baseline changes. Apply a selected path only with the source and target hashes from that preview: `--apply PATH --expect SOURCE_SHA256 --expect-target TARGET_SHA256_OR_absent`. `--json` exposes those values as `sourceHashes` and `targetHashes`. Upgrades do not overwrite customizations unless you select that path.
+
+Project agent guidance is stored in `.herdr-crew/agents/<id>/AGENTS.md`; validated `agent.json` selects an existing permission profile. Project jobs can be launched through a team that references them; native enforcement and live launches remain unverified. When asked to configure runtime assignments, run `herdr-crew configure --show` first, then use `herdr-crew configure <rank-or-job> <claude|opencode> [--model MODEL] [--effort EFFORT]` with the user's requested assignments. `all` sets profile defaults while preserving job overrides. The human wizard is `herdr-crew configure`; agents use arguments instead of an interactive prompt. Runtime settings are in the main project's `.herdr-crew/config.json`, shared across its worktrees. Unsupported agents fail explicitly. OpenCode requires version 2. For OpenCode effort, supply an explicit `--model` and a variant supported by its project catalog; `--effort inherit` uses the model default. The human wizard lists available models and their variants. Catalog lookup uses a private metadata server without creating an agent session or submitting a prompt. Restarts retain saved runtime selections and definitions.
 
 Run the launcher. Pass the instructions on stdin so quoting never breaks:
 
@@ -17,18 +19,18 @@ EOF
 Spec forms:
 - `lead`: starts the crew (lead + manager + board) in a new Herdr tab. Re-running it sends the new instructions to the running lead.
 - `<rank>@<job>`, e.g. `member@driver`, `inspector@navigator`.
-- `<job>` alone is shorthand: `driver` = `member@driver`, rank taken from the persona.
+- `<job>` alone is shorthand: `driver` = `member@driver`, profile taken from its metadata.
 - Add domain personas with `+`: `member@driver+nestjs-expert`, `inspector@code-reviewer+security-paranoid`.
 
-Ranks (permissions, `ranks/`):
+Profiles (permissions, installed under `agents/crew-*/` and copied into each project's `.herdr-crew/agents/`):
 - `lead`: talks to the user, owns the tsk board, asks before any merge.
 - `manager`: started by lead. Spawns teams, watches workers. Never edits code.
 - `member`: read-write in its own worktree, commits on its branch, never pushes.
 - `inspector`: read-only. Investigates, reviews, navigates, triages, tests.
 
-Job personas (`personas/`, have `rank:`): driver, tester, qa-bug-reproducer, planner (member); navigator, code-reviewer, qa-bug-triager, investigator (inspector). A job sets the team slot and its skills.
+Bundled agents (`agents/`, have `agent.json` metadata and `AGENTS.md` guidance): driver, tester, qa-bug-reproducer, planner (member); navigator, code-reviewer, qa-bug-triager, investigator (inspector). A job sets the team slot and its skills. Projects can add job IDs with one of the existing profiles; the profile's native policy remains authoritative.
 
-Domain personas (`personas/`, no `rank:`, stackable on any job): pragmatic-senior (default when none given), nestjs-expert, react-expert, ui-expert, security-paranoid.
+Domain guidance (`personas/`, stackable on any job): pragmatic-senior (default when none given), nestjs-expert, react-expert, ui-expert, security-paranoid.
 
 For clean UI design and development, use the `ui-expert` domain. It combines Impeccable with React engineering, preserves existing design systems, and requires desktop/mobile browser verification. The manager selects it for UI tasks and keeps it on each review round:
 
@@ -64,7 +66,7 @@ Examples:
 
 The manager can add domain personas to a team slot: `herdr-crew team pair T2 --persona navigator=security-paranoid`.
 
-Invalid input (unknown rank, unknown persona, job persona with the wrong rank) fails before anything starts.
+Invalid input (unknown profile or agent, or a job assigned to an incompatible profile) fails before anything starts.
 
 Then relay the command output to the user in one or two lines (tab label, agents started, or the error).
 
@@ -72,10 +74,10 @@ Other commands: `herdr-crew status`, `herdr-crew close <T#> [<team>]` (closes th
 
 `herdr-crew help` lists the commands, and `herdr-crew help <command>` shows one command's arguments, options and examples. Both work without tsk, herdr or jq on PATH. Result lines start with `crew:`, progress lines with `->`, and warnings with `warning:` on stderr.
 
-Context budget: Claude agents get a hook at 135000 tokens. OpenCode has no automatic crew context warning or asynchronous Monitor tool; its runtime brief specifies direct lookups, portable skills and bounded waits with explicit monitoring limits. Subagents are disabled under its native rank policy. Agents write a handoff before compaction; their initiator restarts them.
+Context budget: Claude sessions register the project's `hooks/context-limit.sh` per session and default to 135000 tokens. It is advisory, runs on supported Claude hook events, and requests a handoff once per session; it does not force a stop or cap billing. OpenCode has no automatic crew context warning or asynchronous Monitor tool; its runtime brief specifies direct lookups, portable skills and bounded waits with explicit monitoring limits. Subagents are disabled under its native profile policy. Completion result delivery is not yet an automatic runtime hook; use `herdr-crew mark` or `herdr-crew handoff` and retain task evidence. Agents write a handoff before compaction; their initiator restarts them.
 
 If the output says "not inside Herdr", tell the user to start Herdr and rerun there.
 
-AXI tools: personas and ranks can declare `axi:` (AXI CLIs, e.g. gh-axi). The brief lists them; the launcher warns if one is not on PATH.
+AXI tools: bundled or project agents can declare `axi:` in `agent.json`. The brief lists them; the launcher warns if one is not on PATH.
 
 Install: missing persona skills, plugins and AXI tools are reported by `~/.claude/skills/herdr-crew/bin/install-skills [--check] [-y]`; it asks before each install. Sources are in `skills.sources`.

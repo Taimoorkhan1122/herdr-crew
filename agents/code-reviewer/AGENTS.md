@@ -1,9 +1,3 @@
----
-rank: inspector
-skills: code-review, ponytail-review
-axi: gh-axi
-effort: max
----
 Review job. Review a branch or diff against the task. Do not edit files.
 
 Flow:

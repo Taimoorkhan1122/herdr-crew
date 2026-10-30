@@ -1,0 +1,59 @@
+{
+  "skill_name": "herdr-crew",
+  "execution_constraints": [
+    "Run each comparison in a fresh disposable fixture and fresh agent context.",
+    "The evaluation agent is the only provider-backed model execution. Do not launch crew agents or call real Herdr or tsk services.",
+    "Put fail-closed herdr and tsk stubs first on PATH; retain their invocation logs. Do not install dependencies or change global settings."
+  ],
+  "cases": [
+    {
+      "id": "fresh-project-isolation",
+      "prompt": "Use herdr-crew to set up project alpha for the first time. Keep project beta untouched and report what you changed. Do not start any crew.",
+      "fixture": {
+        "directories": ["alpha", "beta"],
+        "files": {"alpha/README.md": "# Alpha\n", "beta/SENTINEL.txt": "beta must remain unchanged\n"},
+        "git_init": ["alpha", "beta"]
+      },
+      "expected": [
+        "Alpha receives the project-owned baseline and its configuration without creating agent sessions or tasks.",
+        "Beta's complete file tree and bytes remain unchanged.",
+        "The response describes actual changes and any missing prerequisites without installing them."
+      ],
+      "evidence": ["alpha tree and content diff", "beta tree and content hashes before and after", "tool invocation log", "agent response"]
+    },
+    {
+      "id": "custom-inspector-policy",
+      "prompt": "In project alpha, create a payments-reviewer agent with custom guidance to inspect payment code. It must use the existing Inspector profile and stay read-only. Show how its native permissions will be enforced without starting a crew.",
+      "fixture": {
+        "directories": ["alpha"],
+        "files": {"alpha/README.md": "# Alpha\n"},
+        "git_init": ["alpha"],
+        "prepare": "Initialize alpha with the tested skill's supported project setup, retaining setup evidence. If setup cannot run, record the case as blocked rather than inventing baseline files."
+      },
+      "expected": [
+        "The named project agent has its own guidance and validated metadata selecting the existing inspector profile.",
+        "The installed skill baseline and unrelated projects remain unchanged.",
+        "Any claimed permissions are supported by captured native adapter output, not instruction text alone; if capture cannot run without a crew, the agent reports that limitation.",
+        "No runtime agent, task or pane is launched."
+      ],
+      "evidence": ["project agent guidance and metadata", "baseline and unrelated project hashes before and after", "captured native adapter output or explicit evidence gap", "tool invocation log", "agent response"]
+    },
+    {
+      "id": "legacy-upgrade-and-hooks",
+      "prompt": "Project alpha has an older crew configuration and customized agent instructions. Preview the upgrade and apply only the specific baseline change I select; preserve my customization and legacy file. Tell me which automatic context and completion hooks are actually supported, and how to report work when they are not. Do not start a crew.",
+      "fixture": {
+        "directories": ["alpha"],
+        "files": {"alpha/README.md": "# Alpha\n", "alpha/.herdr-crew.json": "{\"version\":1,\"roles\":{}}\n"},
+        "git_init": ["alpha"],
+        "prepare": "Initialize with the tested skill where supported; customize one existing project AGENTS.md with a unique marker. Modify a separate baseline file in an isolated copy to create an upgrade candidate. Select only that separate file after the preview. Retain pre-run bytes of legacy and customization files."
+      },
+      "expected": [
+        "The preview writes nothing and identifies the proposed change before selection.",
+        "Applying the selected change preserves the customized guidance and legacy configuration byte-for-byte and changes no unselected project file, except the corresponding provenance record.",
+        "The response distinguishes verified automatic runtime capabilities from explicit mark or handoff fallback; it identifies unverified capabilities instead of claiming automatic coverage.",
+        "No task is accepted or crew agent launched merely because of an event or upgrade."
+      ],
+      "evidence": ["preview and before/after tree hashes", "selected path and provenance diff", "legacy and customized guidance byte comparison", "capability evidence cited by agent", "tool invocation log", "agent response"]
+    }
+  ]
+}

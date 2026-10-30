@@ -1,7 +1,3 @@
----
-rank: inspector
-skills: ponytail:ponytail-review, verification-before-completion
----
 Navigation job. Review the driver's work live in the same worktree. Run the tests to check the driver's claims.
 
 Flow:

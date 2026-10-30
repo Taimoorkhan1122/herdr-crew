@@ -40,6 +40,8 @@ ${U_BLD}USAGE${U_OFF}
   ${U_DIM}\$${U_OFF} herdr-crew help <command>
 
 ${U_BLD}COMMANDS${U_OFF}
+  ${U_BLU}init${U_OFF}        Initialize the project baseline
+  ${U_BLU}upgrade${U_OFF}     Preview or apply selected baseline updates
   ${U_BLU}configure${U_OFF}   Set the agent, model and effort of each rank and job
   ${U_BLU}launch${U_OFF}      Start a crew, or a job persona with a new task and its team
   ${U_BLU}team${U_OFF}        Start the team of an existing task
@@ -80,6 +82,18 @@ ${U_DIM}Docs: docs/features.md in the herdr-crew installation.${U_OFF}
 EOF
 }
 
+usage_init() { cat <<'EOF'
+USAGE
+  herdr-crew init [--json]
+Initialize missing project baseline files without replacing customizations.
+EOF
+}
+usage_upgrade() { cat <<'EOF'
+USAGE
+  herdr-crew upgrade [--json] [--apply RELATIVE_PATH --expect SOURCE_SHA256 --expect-target TARGET_SHA256_OR_absent]...
+Preview baseline changes and source/target hashes, or apply selected paths with their reviewed values.
+EOF
+}
 usage_configure() {
   cat <<'EOF'
 USAGE
@@ -309,7 +323,7 @@ cmd_completion() {
 _herdr_crew() {
   local cur commands
   cur="${COMP_WORDS[COMP_CWORD]}"
-  commands="configure launch team say mark status close watch handoff restart completion help"
+  commands="init upgrade configure launch team say mark status close watch handoff restart completion help"
   if (( COMP_CWORD == 1 )); then
     COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
   else
@@ -324,7 +338,7 @@ EOF
 # zsh completion for herdr-crew. Source it from a directory on your fpath.
 _herdr_crew() {
   local -a commands
-  commands=(configure launch team say mark status close watch handoff restart completion help)
+  commands=(init upgrade configure launch team say mark status close watch handoff restart completion help)
   _describe -t commands 'herdr-crew command' commands
 }
 _herdr_crew "$@"

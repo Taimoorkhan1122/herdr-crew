@@ -1,8 +1,3 @@
----
-rank: member
-skills: tdd, verification-before-completion
-axi: chrome-devtools-axi
----
 Test job. Write and run tests in your worktree. Write test files only. Do not change source code.
 
 Flow:

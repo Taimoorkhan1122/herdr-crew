@@ -33,6 +33,7 @@ case "$1 $2" in
     if [[ -f "$STATE/stale" ]]; then echo '{"error":{"code":"agent_name_in_use"}}'; exit 1; fi
     for ((j=1; j <= $#; j++)); do
       if [[ "${!j}" == --settings ]]; then j=$((j+1)); printf '%s' "${!j}" >"$STATE/settings.json"; fi
+      if [[ "${!j}" == --agents ]]; then j=$((j+1)); printf '%s' "${!j}" >"$STATE/$3.agents.json"; fi
     done
     echo idle >"$STATE/$3"
     if [[ -f "$TMP/trust" ]]; then rm -f "$TMP/trust"; echo '{"error":{"code":"agent_not_ready"}}'; exit 1; fi ;;
@@ -253,10 +254,10 @@ reset
 out=$("$CREW" close T7 review 2>&1)
 in_log "close team: closes the T7 review tab" "tab close w1:t2"
 [[ $(cnt 'tab close w1:t1') == 0 ]] && pass "close team: leaves the T7 pair tab" || flunk "close team: closed the T7 pair tab"
-in_out "prompt: manager runs the review team" "herdr-crew team review T<n>" "$(cat "$(dirname "$CREW")/../ranks/crew-manager.md")"
-in_out "prompt: manager marks done after approval" "mark T<n> done" "$(cat "$(dirname "$CREW")/../ranks/crew-manager.md")"
-in_out "prompt: reviewer approves with approve" '"approve"' "$(cat "$(dirname "$CREW")/../personas/code-reviewer.md")"
-in_out "prompt: navigator verdict uses nav fix:" "nav fix:" "$(cat "$(dirname "$CREW")/../personas/navigator.md")"
+in_out "prompt: manager runs the review team" "herdr-crew team review T<n>" "$(cat "$(dirname "$CREW")/../agents/crew-manager/AGENTS.md")"
+in_out "prompt: manager marks done after approval" "mark T<n> done" "$(cat "$(dirname "$CREW")/../agents/crew-manager/AGENTS.md")"
+in_out "prompt: reviewer approves with approve" '"approve"' "$(cat "$(dirname "$CREW")/../agents/code-reviewer/AGENTS.md")"
+in_out "prompt: navigator verdict uses nav fix:" "nav fix:" "$(cat "$(dirname "$CREW")/../agents/navigator/AGENTS.md")"
 
 # 18. context budget and Monitor: ctx-guard hook, --settings and saved state, handoff, restart, watch, rank prompts
 GUARD="$(dirname "$CREW")/ctx-guard"
@@ -277,11 +278,11 @@ out=$(hook "$CTXDIR/small.jsonl" s1000 | CREW_SLUG=$S "$GUARD")
 out=$(hook "$CTXDIR/missing.jsonl" s404 | CREW_SLUG=$S "$GUARD"); rc=$?
 (( rc == 0 )) && [[ -z "$out" ]] && pass "ctx-guard: missing transcript exits 0 and stays silent" || flunk "ctx-guard: missing transcript (rc=$rc)"
 
-# the launched driver is registered with ctx-guard, and its meta and brief are saved for restart
+# Launched agents register saved context hooks and retain metadata for restart.
 reset
 out=$(echo "budget check" | "$CREW" launch driver - 2>&1)
 in_log "budget: start passes --settings" "--settings"
-in_log "budget: settings register ctx-guard" "$GUARD"
+in_log "budget: settings register a saved context hook" ".context-limit."
 [[ -f "$HOME/.herdr/crew/$S/$S-t7-driver.meta" ]] && pass "budget: meta file saved" || flunk "budget: no meta file"
 [[ -f "$HOME/.herdr/crew/$S/$S-t7-driver.brief" ]] && pass "budget: brief file saved" || flunk "budget: no brief file"
 in_out "budget: brief names the context budget" "Context budget" "$(cat "$HOME/.herdr/crew/$S/$S-t7-driver.brief")"
@@ -294,14 +295,13 @@ in_log "handoff: step on the task" "tsk steps T7 add [handoff] $S-t7-driver: hal
 in_log "handoff: prompts the manager for a worker" "agent prompt $S-manager [from $S-t7-driver] $S-t7-driver hit the context limit"
 reject "handoff: refuses with no body and no file" "no handoff at" "" handoff "x"
 
-# restart: /exit, wait for the shell, start again in the same pane with the resume line, rename the old handoff
+# restart: /exit, wait for the shell, start again with a readable handoff path
 reset
 out=$("$CREW" restart "$S-t7-driver" 2>&1)
 in_log "restart: /exit the agent" "agent prompt $S-t7-driver /exit"
 in_log "restart: starts the agent again" "agent start $S-t7-driver --pane"
 in_log "restart: brief resumes from the handoff" "Resume from your handoff: $HOME/.herdr/crew/$S/handoff-$S-t7-driver.md"
-set -- "$HOME/.herdr/crew/$S"/handoff-$S-t7-driver.*.md
-[[ -f "$1" ]] && pass "restart: old handoff renamed with an epoch" || flunk "restart: handoff not renamed"
+[[ -f "$HOME/.herdr/crew/$S/handoff-$S-t7-driver.md" ]] && pass "restart: handoff remains readable" || flunk "restart: handoff missing"
 
 # watch: a status change prints one line, unchanged tasks print nothing (two polls)
 reset; printf '%s\n' ready review >"$STATE/tsk-seq"
@@ -315,9 +315,9 @@ out=$(cd "$REPO" && CREW_WATCH_ONCE=1 CREW_WATCH_SECS=0 "$CREW" watch 2>&1)
 in_out "watch: review -> done from the done list" "T7 review -> done: fix the login bug" "$out"
 
 # rank prompts: the lead watches the board, the manager restarts on handoff
-in_out "prompt: lead has the Monitor tool" "Monitor" "$(cat "$(dirname "$CREW")/../ranks/crew-lead.md")"
-in_out "prompt: lead monitors with herdr-crew watch" "herdr-crew watch" "$(cat "$(dirname "$CREW")/../ranks/crew-lead.md")"
-in_out "prompt: manager restarts a worker on handoff" "herdr-crew restart <agent>" "$(cat "$(dirname "$CREW")/../ranks/crew-manager.md")"
+in_out "prompt: lead has the Monitor tool" "Monitor" "$(cat "$(dirname "$CREW")/../agents/crew-lead/AGENTS.md")"
+in_out "prompt: lead monitors with herdr-crew watch" "herdr-crew watch" "$(cat "$(dirname "$CREW")/../agents/crew-lead/AGENTS.md")"
+in_out "prompt: manager restarts a worker on handoff" "herdr-crew restart <agent>" "$(cat "$(dirname "$CREW")/../agents/crew-manager/AGENTS.md")"
 
 # 19. Restart survives an agent that already exited.
 reset; touch "$STATE/gone"
@@ -407,7 +407,7 @@ for spec in investigator inspector@investigator; do
     [[ $(cnt 'agent start') == 1 ]] && pass "investigate $spec: one worker" || flunk "investigate $spec: extra worker"
     [[ $(cnt 'worktree add') == 0 && $(cnt 'checkout') == 0 ]] && pass "investigate $spec: no worktree or checkout" || flunk "investigate $spec: git mutation"
     investigation_brief=$(brief_of "$S-t7-investigator")
-    in_out "investigate $spec: persona loaded" "Persona (investigator):" "$investigation_brief"
+    jq -e '.["crew-inspector"].prompt | contains("Investigation job.")' "$STATE/$S-t7-investigator.agents.json" >/dev/null && pass "investigate $spec: persona loaded" || flunk "investigate $spec: persona missing"
     in_out "investigate $spec: batch preserved" "$questions" "$investigation_brief"
     panes_ok "investigate $spec: pane environment"
   fi
@@ -435,9 +435,10 @@ for spec in planner member@planner; do
     [[ $(cnt 'agent start') == 1 && $(cnt 'pane split') == 0 ]] && pass "plan $spec: one worker" || flunk "plan $spec: extra worker"
     plan_brief=$(brief_of "$S-t7-planner")
     in_out "plan $spec: original request" "$plan_request" "$plan_brief"
-    in_out "plan $spec: documentation scope" "Planning artifacts only" "$plan_brief"
-    in_out "plan $spec: contract pointer" "docs/planning/visual-plan-contract.md" "$plan_brief"
-    in_out "plan $spec: reports version" "plan ready:" "$plan_brief"
+    plan_guidance=$(jq -r '.["crew-member"].prompt' "$STATE/$S-t7-planner.agents.json")
+    in_out "plan $spec: documentation scope" "Planning artifacts only" "$plan_guidance"
+    in_out "plan $spec: contract pointer" "docs/planning/visual-plan-contract.md" "$plan_guidance"
+    in_out "plan $spec: reports version" "plan ready:" "$plan_guidance"
     in_out "plan $spec: visual tooling" "lavish-axi" "$plan_brief"
     panes_ok "plan $spec: environment"
   fi
@@ -447,8 +448,8 @@ rc=0; out=$("$CREW" team plan T7 "$plan_request" 2>&1) || rc=$?
 (( rc == 0 )) && pass "plan team: existing task" || flunk "plan team: rc=$rc ($out)"
 [[ $(cnt 'tsk add') == 0 ]] && pass "plan team: no duplicate task" || flunk "plan team: duplicate task"
 reject "plan: wrong rank refused" "is a member job" "write plan" launch inspector@planner -
-lead_rules=$(cat "$(dirname "$CREW")/../ranks/crew-lead.md")
-manager_rules=$(cat "$(dirname "$CREW")/../ranks/crew-manager.md")
+lead_rules=$(cat "$(dirname "$CREW")/../agents/crew-lead/AGENTS.md")
+manager_rules=$(cat "$(dirname "$CREW")/../agents/crew-manager/AGENTS.md")
 in_out "planning rules: Lead dispatch" "Run T<n> (plan)" "$lead_rules"
 in_out "planning rules: approval evidence" "[plan approved]" "$lead_rules"
 in_out "planning rules: revisions reopen" "reopen the same planning task" "$lead_rules"
@@ -457,7 +458,7 @@ in_out "planning rules: standalone review" "standalone planner stays at review" 
 in_out "planning rules: draft completion" 'done "plan ready:' "$manager_rules"
 in_out "planning rules: no implicit implementation" "Draft completion never authorizes implementation" "$manager_rules"
 in_out "planning rules: handoff limitation" "known restart handoff-file race" "$lead_rules"
-planner_rules=$(cat "$(dirname "$CREW")/../personas/planner.md")
+planner_rules=$(cat "$(dirname "$CREW")/../agents/planner/AGENTS.md")
 in_out "planning source: checks live repo" 'git -C "$CREW_REPO" status --short' "$planner_rules"
 in_out "planning source: blocks stale draft" "source drift" "$planner_rules"
 in_out "planning source: checks before dispatch" "source drift" "$lead_rules"
@@ -488,6 +489,8 @@ rc=0; out=$("$CREW" -V 2>&1) || rc=$?
 NORUN="$TMP/norun"; mkdir -p "$NORUN"
 ( IFS=:; for d in $PATH; do for f in "$d"/*; do b=${f##*/}; case "$b" in jq|tsk|herdr) ;; *) ln -s "$f" "$NORUN/$b" 2>/dev/null || true ;; esac; done; done )
 norun_ok=0
+# Bash may retain earlier command paths even when PATH is temporarily changed.
+hash -r
 for probe in jq tsk herdr; do PATH="$NORUN" command -v "$probe" >/dev/null || norun_ok=$((norun_ok + 1)); done
 (( norun_ok == 3 )) && pass "no-runtime farm: jq, tsk and herdr are absent" || flunk "no-runtime farm: a runtime is still present"
 for probe in "--help" "help" "help team" "launch --help" "configure --help"; do

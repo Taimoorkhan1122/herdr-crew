@@ -1,6 +1,6 @@
 # Working on herdr-crew
 
-These instructions govern maintenance of this repository. Runtime crew roles also follow `ranks/` and `personas/`; keep their permissions intact. A restricted Lead routes file updates through an authorized worker.
+These instructions govern maintenance of this repository. Runtime crew roles also follow `agents/` and `personas/`; keep their permissions intact. A restricted Lead routes file updates through an authorized worker.
 
 ## Start or resume a session
 
@@ -13,7 +13,7 @@ These instructions govern maintenance of this repository. Runtime crew roles als
 ## Project map and engineering rules
 
 - `bin/crew`: Bash launcher and Herdr/tsk coordination. `bin/ctx-guard`: context hook. `bin/install-skills`: dependency checks and prompted installation.
-- `ranks/`, `personas/`, `teams/`, and `skills.sources`: agent permissions, instructions, layouts, and dependencies. `SKILL.md` is the user-facing skill entry point.
+- `agents/`, `personas/`, `teams/`, and `skills.sources`: agent permissions, instructions, layouts, and dependencies. `SKILL.md` is the user-facing skill entry point.
 - Prefer the smallest complete change. Reuse existing shell functions and conventions; add dependencies, abstractions, and configuration only for a demonstrated need.
 - Preserve command names, output, exit codes, Bash 3.2 compatibility, worktree ownership checks, and launch/restart contracts unless the task explicitly changes them.
 - Before writing, debugging, or reviewing shell scripts, read the [shell-scripting skill](.agents/skills/shell-scripting/SKILL.md). Apply its quoting, arrays, argument handling, error handling, and file-safety guidance within these project contracts. Choose strict mode and traps per script; preserve `ctx-guard`'s always-successful hook contract. Keep Bash scripts compatible with Bash 3.2 and add tools only for a demonstrated need.

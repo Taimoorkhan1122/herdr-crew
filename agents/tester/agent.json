@@ -1,0 +1,12 @@
+{
+  "skills": [
+    "tdd",
+    "verification-before-completion"
+  ],
+  "axi": [
+    "chrome-devtools-axi"
+  ],
+  "name": "tester",
+  "profile": "member",
+  "description": "Test job. Write and run tests in your worktree. Write test files only. Do not change source code."
+}

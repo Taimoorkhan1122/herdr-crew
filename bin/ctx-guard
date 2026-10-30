@@ -1,23 +1,5 @@
 #!/usr/bin/env bash
-# ctx-guard: Claude Code hook (PostToolUse, UserPromptSubmit). Once per session, when the context reaches the crew
-# budget, it tells the agent to hand off. Always exits 0: a failing hook must never stop an agent.
-input=$(cat)
-field() { jq -r ".$1 // empty" <<<"$input" 2>/dev/null || true; }
-tr=$(field transcript_path); sid=$(field session_id); ev=$(field hook_event_name)
-limit=${CREW_CTX_LIMIT:-135000}
-dir="$HOME/.herdr/crew/${CREW_SLUG:-x}"
-size=0
-if [[ -f "$tr" ]]; then
-  # context size = usage of the last main-thread assistant turn (sub-agent turns are skipped)
-  # tail keeps the hook fast on big transcripts; the last main-thread turn is always near the end
-  size=$(tail -n 400 "$tr" | jq -r 'select(.type == "assistant" and .isSidechain != true)
-    | (.message.usage // {}) | ((.input_tokens // 0) + (.cache_read_input_tokens // 0) + (.cache_creation_input_tokens // 0))' \
-    2>/dev/null | tail -1 || true)
-fi
-[[ "$size" =~ ^[0-9]+$ ]] || size=0
-if (( size >= limit )) && [[ ! -e "$dir/ctx-$sid" ]]; then
-  mkdir -p "$dir" && touch "$dir/ctx-$sid"  # once per session
-  msg="Context is $size tokens, at or over the crew limit of $limit. Finish the current step only. Write your handoff with: herdr-crew handoff \"<one line status>\" <<'EOF' ... EOF (goal, done, in progress, next steps, files, task number). It is saved to $dir/handoff-${CREW_AGENT:-x}.md. Then stop and wait."
-  jq -nc --arg e "$ev" --arg m "$msg" '{hookSpecificOutput: {hookEventName: $e, additionalContext: $m}}'
-fi
+# Compatibility entry point for older Claude settings.
+hook="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/hooks/context-limit.sh"
+/bin/bash "$hook" "$@" 2>/dev/null || true
 exit 0
