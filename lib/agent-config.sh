@@ -1,32 +1,31 @@
 # Sourced by bin/crew. Project configuration is JSON data, never executable shell.
 OPENCODE_CATALOG=""
 config_load() {
-  local entry common gitdir
-  CONFIG_ROOT=$REPO
-  if git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
-    # The primary checkout can be separate from its Git metadata directory.
-    IFS= read -r -d '' entry < <(git -C "$REPO" worktree list --porcelain -z) || die "cannot resolve primary project checkout for $REPO"
-    [[ "$entry" == "worktree "* ]] || die "invalid worktree inventory for $REPO"
-    if ! CONFIG_ROOT=$(git -C "${entry#worktree }" rev-parse --show-toplevel 2>/dev/null); then
-      common=$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir)
-      gitdir=$(git -C "$REPO" rev-parse --absolute-git-dir)
-      [[ "$gitdir" == "$common" ]] || die "cannot locate primary checkout for separate Git metadata; set CREW_REPO to the primary project directory"
-      CONFIG_ROOT=$(git -C "$REPO" rev-parse --show-toplevel) || die "configuration requires a project working directory"
-    fi
-  fi
+  project_root
   CONFIG_FILE="$CONFIG_ROOT/.herdr-crew.json"
+  if [[ -e "$CONFIG_ROOT/.herdr-crew" || -L "$CONFIG_ROOT/.herdr-crew" ]]; then
+    [[ -d "$CONFIG_ROOT/.herdr-crew" && ! -L "$CONFIG_ROOT/.herdr-crew" ]] || die "refusing invalid project configuration directory"
+    CONFIG_FILE="$CONFIG_ROOT/.herdr-crew/config.json"
+    [[ ! -e "$CONFIG_ROOT/.herdr-crew.json" ]] || printf 'warning: legacy configuration retained at %s\n' "$CONFIG_ROOT/.herdr-crew.json" >&2
+  fi
   AGENT_CONFIG='{"version":1,"roles":{}}'
   [[ ! -L "$CONFIG_FILE" ]] || die "refusing symlink configuration: $CONFIG_FILE"
   if [[ -e "$CONFIG_FILE" ]]; then
     AGENT_CONFIG=$(cat "$CONFIG_FILE") || die "cannot read $CONFIG_FILE"
   fi
+  load_definitions
   config_validate "$AGENT_CONFIG"
+  CONFIG_ORIGINAL=$AGENT_CONFIG
+  CONFIG_EXISTED=0
+  [[ ! -e "$CONFIG_FILE" ]] || CONFIG_EXISTED=1
 }
 
 config_validate() {
   local roles="$RANKS" f
-  for f in "$ROOT"/personas/*.md; do
-    [[ -z "$(fm rank "$f")" ]] || roles="$roles $(basename "$f" .md)"
+  for f in "$(project_base)"/agents/*/agent.json; do
+    [[ -f "$f" ]] || continue
+    local id=${f%/agent.json}; id=${id##*/}
+    job_exists "$id" && roles="$roles $id"
   done
   jq -se --arg roles "$roles" '
     def text: type == "string" and length > 0 and (test("[\\x00-\\x1f\\x7f]")|not);
@@ -52,13 +51,12 @@ config_validate() {
 # agent_selection RANK JOB: sets AGENT_KIND/MODEL/EFFORT and a JSON snapshot.
 agent_selection() {
   local rank=$1 job=${2:-} kind model effort
-  kind=$(fm kind "$(rank_file "$rank")"); kind=${kind:-claude}
-  model=$(fm model "$(rank_file "$rank")"); effort=$(fm effort "$(rank_file "$rank")")
-  if [[ "$kind" == opencode ]]; then
-    model=$(fm opencode_model "$(rank_file "$rank")"); effort=""
-  elif [[ -n "$job" ]]; then
-    effort=$(fm effort "$(pfile "$job")"); effort=${effort:-$(fm effort "$(rank_file "$rank")")}
-  fi
+  local def
+  def=$(agent_definition "${job:-crew-$rank}") || die "unknown agent '${job:-crew-$rank}'"
+  [[ "$(jq -r .profile <<<"$def")" == "$rank" ]] || die "agent '$job' does not use profile '$rank'"
+  kind=$(jq -r '.kind // "claude"' <<<"$def")
+  model=$(jq -r '.model // ""' <<<"$def"); effort=$(jq -r '.effort // ""' <<<"$def")
+  if [[ "$kind" == opencode ]]; then model=""; effort=""; fi
   AGENT_JSON=$(jq -nc --argjson config "$AGENT_CONFIG" --arg rank "$rank" --arg job "$job" \
     --arg agent "$kind" --arg model "$model" --arg effort "$effort" '
     def overlay($next): if $next == null then . else
@@ -85,16 +83,16 @@ config_show() {
     agent_selection "$rank" ""
     printf '%s\t%s\t%s\t%s\n' "$rank" "$AGENT_KIND" "${AGENT_MODEL:-default}" "${AGENT_EFFORT:-default}"
   done
-  for f in "$ROOT"/personas/*.md; do
-    rank=$(fm rank "$f"); [[ -n "$rank" ]] || continue
-    job=$(basename "$f" .md); agent_selection "$rank" "$job"
+  for f in "$(project_base)"/agents/*/agent.json; do
+    job=${f%/agent.json}; job=${job##*/}; job_exists "$job" || continue
+    rank=$(job_meta "$job" profile); agent_selection "$rank" "$job"
     printf '%s\t%s\t%s\t%s\n' "$job" "$AGENT_KIND" "${AGENT_MODEL:-default}" "${AGENT_EFFORT:-default}"
   done
 }
 
 config_set() {
   local role=$1 agent=$2 model=$3 effort=$4 value variants
-  [[ "$role" == all || " $RANKS $(all_jobs | tr '\n' ' ') " == *" $role "* ]] || die "unknown role '$role'; use a rank ($RANKS) or job (driver, navigator, planner, ...)"
+  [[ "$role" == all || " $RANKS $(for f in "$(project_base)"/agents/*/agent.json; do basename "$(dirname "$f")"; done | tr '\n' ' ') " == *" $role "* ]] || die "unknown role '$role'; use a rank ($RANKS) or job (driver, navigator, planner, ...)"
   if [[ "$agent" == opencode && -n "$effort" && "$effort" != inherit ]]; then
     [[ -n "$model" && "$model" != inherit ]] || die "OpenCode effort requires an explicit --model provider/model"
     opencode_catalog
@@ -113,13 +111,24 @@ config_set() {
 }
 
 config_save() (
-  local tmp
+  local tmp='' lock="$CONFIG_ROOT/.herdr-crew.lock" current
+  mkdir "$lock" 2>/dev/null || die "project configuration is locked: $lock"
+  trap '[[ -z "$tmp" ]] || rm -f "$tmp"; rmdir "$lock" 2>/dev/null || :' EXIT
   [[ ! -L "$CONFIG_FILE" ]] || die "refusing symlink configuration: $CONFIG_FILE"
-  tmp=$(mktemp "$CONFIG_ROOT/.herdr-crew.json.XXXXXX") || die "cannot write configuration in $CONFIG_ROOT"
-  trap 'rm -f "$tmp"' EXIT
+  if [[ "$CONFIG_FILE" == "$CONFIG_ROOT/.herdr-crew.json" && ( -e "$CONFIG_ROOT/.herdr-crew" || -L "$CONFIG_ROOT/.herdr-crew" ) ]]; then
+    die "project configuration changed; retry configure"
+  fi
+  if [[ "$CONFIG_EXISTED" == 1 ]]; then
+    [[ -f "$CONFIG_FILE" ]] || die "configuration changed; retry configure"
+    current=$(cat "$CONFIG_FILE") || die "cannot read configuration"
+    [[ "$current" == "$CONFIG_ORIGINAL" ]] || die "configuration changed; retry configure"
+  else [[ ! -e "$CONFIG_FILE" ]] || die "configuration changed; retry configure"; fi
+  tmp=$(mktemp "$(dirname "$CONFIG_FILE")/.crew-config.XXXXXX") || die "cannot write configuration in $CONFIG_ROOT"
   printf '%s\n' "$AGENT_CONFIG" >"$tmp"
   mv -f "$tmp" "$CONFIG_FILE"
+  tmp=''
 )
+
 
 # The private metadata request creates no session and submits no model prompt.
 opencode_catalog() {
@@ -222,7 +231,7 @@ agent_check() {
     [[ -z "$AGENT_MODEL" || "$AGENT_MODEL" =~ ^[^/#]+/[^#]+$ ]] || die "OpenCode model must be provider/model without variants"
     [[ -z "$AGENT_EFFORT" || -n "$AGENT_MODEL" ]] || die "OpenCode effort requires an explicit model"
     version=$(opencode --version 2>/dev/null) || die "cannot check OpenCode version; OpenCode 2 is required"
-    [[ "$version" =~ (^|[[:space:]])2\.[0-9]+\. ]] || die "OpenCode 2 is required for native crew permissions (found: $version)"
+    [[ "$version" =~ (^|[[:space:]])v?2\.[0-9]+\. ]] || die "OpenCode 2 is required for native crew permissions (found: $version)"
   fi
 }
 
@@ -245,9 +254,11 @@ GUIDANCE
 
 # OpenCode 2 permissions are ordered; the last matching rule wins.
 opencode_config() {
-  local rank=$1 shell_rules
-  shell_rules=$(fm tools "$(rank_file "$rank")" | jq -Rc '[scan("Bash\\(([^)]+)\\)") | .[0] | {action:"shell",resource:.,effect:"allow"}]')
-  jq -nc --arg rank "$rank" --arg model "$AGENT_MODEL" --arg effort "$AGENT_EFFORT" --arg system "$(body "$(rank_file "$rank")")
+  local rank=$1 job=${2:-} shell_rules def system
+  def=$(agent_definition "${job:-crew-$rank}") || die "cannot resolve project agent"
+  shell_rules=$(jq -c '[.tools[]? | capture("^Bash\\((?<cmd>.*)\\)$")? | {action:"shell",resource:.cmd,effect:"allow"}]' <<<"$def")
+  system=$(jq -r '.profileInstructions + (if .id == ("crew-" + .profile) then "" else "\n\n" + .instructions end)' <<<"$def")
+  jq -nc --arg rank "$rank" --arg model "$AGENT_MODEL" --arg effort "$AGENT_EFFORT" --arg system "$system
 
 $(opencode_guidance)" \
     --argjson shell_rules "$shell_rules" '

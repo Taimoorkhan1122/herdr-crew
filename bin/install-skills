@@ -3,7 +3,7 @@
 # Usage: install-skills [--check] [-y|--yes]
 #   --check   report only, change nothing; exit 1 if anything is missing
 #   -y, --yes accept every prompt (non-interactive)
-# Required = `skills:` of personas/*.md + names in skills.sources + `axi:` of personas and ranks (AXI CLIs, npm -g).
+# Required = agent metadata and domain persona skills/AXI plus names in skills.sources.
 # skills.sources lines: `<skill> <owner/repo>` | `<skill> plugin <plugin@marketplace>` | `<skill> UNKNOWN` | `<tool> axi npm:<pkg>`.
 # Prompts read /dev/tty; with no terminal the answer is No.
 
@@ -25,11 +25,18 @@ for arg in "$@"; do
   esac
 done
 
-# list_key KEY: values of a frontmatter list key across personas and ranks, one per line
+# list_key KEY: values from agent metadata and domain persona frontmatter.
 list_key() {
-  for f in "$DIR"/personas/*.md "$DIR"/ranks/*.md; do
+  {
+  for f in "$DIR"/agents/*/agent.json; do
+    [ -f "$f" ] || continue
+    jq -r --arg key "$1" '.[$key][]?' "$f"
+  done
+  for f in "$DIR"/personas/*.md; do
+    awk 'NR==1&&/^---/{f=1;next} f&&/^---/{exit} f&&/^rank:/{found=1} END{exit !found}' "$f" && continue
     awk -v k="$1" 'NR==1 && /^---/ {fm=1; next} fm && /^---/ {exit} fm && $0 ~ "^"k":" {sub("^"k":[ \t]*", ""); print}' "$f"
-  done | tr ',' '\n' | tr -d ' \t\r' | awk 'NF && !seen[$0]++'
+  done
+  } | tr ',' '\n' | tr -d ' \t\r' | awk 'NF && !seen[$0]++'
 }
 
 persona_skills() { list_key skills; }

@@ -1,6 +1,3 @@
----
-rank: inspector
----
 Investigation job. Answer project questions from current source and configuration. Keep project files unchanged. Record answers in tsk.
 
 Flow:

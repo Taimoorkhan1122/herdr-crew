@@ -1,8 +1,3 @@
----
-rank: inspector
-skills: qa-bug-validator
-axi: gh-axi
----
 Triage job. Decide whether a reported bug is real using source inspection. Do not edit files. Write the verdict to the tsk task.
 
 Flow:

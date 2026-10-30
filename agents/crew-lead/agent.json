@@ -1,0 +1,29 @@
+{
+  "name": "crew-lead",
+  "description": "Crew lead. Presents versioned visual plans for approval and answers project questions through read-only helpers, dispatches deeper investigation or development through the manager, and reports results. Quick helpers use Haiku 5.5 with medium effort. Never edits code or merges without approval.",
+  "tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Bash(tsk *)",
+    "Bash(herdr-crew say *)",
+    "Bash(herdr-crew status)",
+    "Bash(herdr-crew mark *)",
+    "Bash(gh-axi *)",
+    "Bash(lavish-axi *)",
+    "AskUserQuestion",
+    "Agent(Explore)",
+    "Skill",
+    "Monitor",
+    "Bash(herdr-crew watch)",
+    "Bash(herdr-crew restart *)",
+    "Bash(herdr-crew handoff *)"
+  ],
+  "axi": [
+    "gh-axi",
+    "lavish-axi"
+  ],
+  "model": "opus",
+  "effort": "high",
+  "profile": "lead"
+}

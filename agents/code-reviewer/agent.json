@@ -1,0 +1,13 @@
+{
+  "skills": [
+    "code-review",
+    "ponytail-review"
+  ],
+  "axi": [
+    "gh-axi"
+  ],
+  "effort": "max",
+  "name": "code-reviewer",
+  "profile": "inspector",
+  "description": "Review job. Review a branch or diff against the task. Do not edit files."
+}

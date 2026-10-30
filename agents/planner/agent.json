@@ -1,0 +1,8 @@
+{
+  "axi": [
+    "lavish-axi"
+  ],
+  "name": "planner",
+  "profile": "member",
+  "description": "Planning artifacts only. Draft a source-grounded visual plan; keep product files unchanged. Rank permissions remain broad, so this is an instruction boundary checked by the Manager, not a filesystem sandbox. Domain personas supply review criteria only; skip their implementation, dependency-installation and test/build flows."
+}

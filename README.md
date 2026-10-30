@@ -57,15 +57,12 @@ Clone or download this repository, then run the following from its root. Keep th
 
 ```bash
 project_dir="$(pwd -P)"
-mkdir -p "$HOME/.local/bin" "$HOME/.claude/skills" "$HOME/.claude/agents"
+mkdir -p "$HOME/.local/bin" "$HOME/.claude/skills"
 ln -s "$project_dir/bin/crew" "$HOME/.local/bin/herdr-crew"
 ln -s "$project_dir" "$HOME/.claude/skills/herdr-crew"
-for rank in "$project_dir"/ranks/crew-*.md; do
-  ln -s "$rank" "$HOME/.claude/agents/$(basename "$rank")"
-done
 ```
 
-If a link already exists, inspect it before replacing it; the commands above do not overwrite existing files. Make sure `~/.local/bin` is on your PATH. Restart Claude Code after linking the skill and ranks.
+If a link already exists, inspect it before replacing it; the commands above do not overwrite existing files. Make sure `~/.local/bin` is on your PATH. The launcher loads definitions from the installed package and supplies them to each Claude session; no global rank-agent links are needed.
 
 Then install the Claude skills the personas need. Check first:
 
@@ -85,7 +82,24 @@ For each missing item it shows the command and asks `[y/N]`. Nothing installs un
 
 ## How to use
 
-### Configure agents for this project
+### Set up and configure project agents
+
+The first `launch` or `team` in a project creates `.herdr-crew/` from the installed baseline before starting agents. To set it up explicitly without launching a crew, run `herdr-crew init`. Initialization adds missing files and keeps files already present. It creates `config.json` and `baseline.json` alongside copied `agents/`, `personas/`, `teams/`, and `hooks/` content.
+
+Existing valid `.herdr-crew.json` assignments are imported into `config.json` during first initialization; the old file is retained unchanged. If both formats already exist, `.herdr-crew/config.json` is used and the legacy file is reported.
+
+To review bundled changes later, run `herdr-crew upgrade`. Preview output lists each changed path with the installed-source and current-project SHA-256 values. Apply only a path selected from that preview, supplying both hashes exactly:
+
+```bash
+herdr-crew upgrade --apply agents/driver/AGENTS.md \\
+  --expect <source-sha256> --expect-target <project-sha256-or-absent>
+```
+
+Both values are required so the source and project file must still match the preview. `upgrade --json` returns these maps in `sourceHashes` and `targetHashes`; add one `--apply ... --expect ... --expect-target ...` group for each selected path. Customized or unselected files are left alone. `--dry-run init` reports the plan without writing. Initialization and upgrade do not install dependencies or start agents.
+
+Edit a project's `.herdr-crew/agents/<id>/AGENTS.md` and `agent.json` to customize a named agent. Metadata chooses one of the four existing profiles (`lead`, `manager`, `member`, `inspector`); job guidance cannot expand the profile's native tools or permission mode. Project edits apply to new launches. A running session and its restart retain the saved definition; use a new launch to adopt edits. Updating the installed baseline does not change existing projects until selected paths are applied with `upgrade`.
+
+### Configure runtime assignments
 
 Run the setup in your project directory:
 
@@ -104,7 +118,7 @@ herdr-crew configure --show
 
 Replace `provider/model` with a model available in your authenticated OpenCode installation. Supported agents are `claude` and `opencode` (version 2). Other Herdr agent kinds, including Codex and Gemini, need permission/lifecycle adapters before they can be selected. Unsupported selections fail explicitly.
 
-Settings live in `.herdr-crew.json` in the primary project checkout. Each project's linked worker worktrees read that same file, including uncommitted configuration edits. For a manually entered linked checkout with separate Git metadata that does not identify its primary working directory, set `CREW_REPO` to the primary project directory; crew-created workers already receive it. Ambiguous checkout discovery fails rather than writing into Git metadata. You can commit it to share assignments, or keep it local. It contains agent/model settings, never credentials:
+Runtime assignments live in `.herdr-crew/config.json` in the primary project checkout. Each project's linked worker worktrees read that same file, including uncommitted configuration edits. For a manually entered linked checkout with separate Git metadata that does not identify its primary working directory, set `CREW_REPO` to the primary project directory; crew-created workers already receive it. Ambiguous checkout discovery fails rather than writing into Git metadata. You can commit it to share assignments, or keep it local. It contains agent/model settings, never credentials:
 
 ```json
 {
@@ -234,7 +248,7 @@ Unchanged state prints nothing. Set `CREW_WATCH_SECS` to change the interval. Pr
 
 ### Context budget and handoffs
 
-Claude agents have a warning budget of 135000 tokens, set with `CREW_CTX_LIMIT`. A hook, `bin/ctx-guard`, warns once per session when it reaches the budget. OpenCode agents must monitor context themselves; they do not receive this hook. The agent then writes a handoff and stops:
+Claude agents have a warning budget of 135000 tokens, set with `CREW_CTX_LIMIT`. A saved copy of the project's context hook warns once per session when it reaches the budget. OpenCode agents must monitor context themselves; they do not receive this hook. The agent then writes a handoff and stops:
 
 ```bash
 herdr-crew handoff "half done, tests pass" <<'EOF'
@@ -296,9 +310,9 @@ A separate investigator costs another agent session and coordination. Quick fact
 
 ## Reference
 
-### Ranks
+### Profiles
 
-A rank sets what an agent may do. The rank files live in `ranks/`, and symlinks in `~/.claude/agents/` let Claude Code load them.
+A profile sets what an agent may do. Bundled profiles live in `agents/crew-*/{AGENTS.md,agent.json}` and are copied into each project's `.herdr-crew/agents/`. The launcher passes the selected definition and native permission settings to Claude per session; project job guidance cannot add profile tools or change its permission mode.
 
 | Rank | What it can do | Model | Effort | Communication style | AXI tools |
 |---|---|---|---|---|---|
@@ -307,11 +321,11 @@ A rank sets what an agent may do. The rank files live in `ranks/`, and symlinks 
 | `member` | Reads and writes files in its own worktree and commits on its branch. Never pushes or merges. | haiku | high | Default | none |
 | `inspector` | Read-only. Reviews, navigates, triages bugs, runs tests. | haiku | xhigh | Default | none (see AXI tools) |
 
-These are bundled Claude defaults. Project agent assignments override them. Effort sets how much the model thinks before it answers. A job persona can set its own Claude effort, which overrides the bundled rank effort; explicit project settings take precedence.
+These are bundled defaults. Runtime assignment settings can override agent and model selection. Effort sets how much the model thinks before it answers. A job's `agent.json` can set effort; explicit project settings take precedence.
 
 ### Personas
 
-Job personas have a `rank:` line and fill a team slot. Domain personas have no `rank:` line and can be added to any job. If none is given, `pragmatic-senior` is used.
+Bundled job agents have an `agent.json` profile and fill a team slot. Their instructions are in `agents/<id>/AGENTS.md`. Domain guidance in `personas/` can be added to any job. If none is given, `pragmatic-senior` is used. A project can define additional agent IDs under `.herdr-crew/agents/` with a matching `AGENTS.md` and validated metadata.
 
 | Persona | Kind | Rank | Skills | AXI tools | Effort | Purpose |
 |---|---|---|---|---|---|---|
@@ -388,7 +402,7 @@ For all environment controls, command options, hook behavior, and completion flo
 
 AXI (Agent eXperience Interface) is a set of command-line tools built for agents. Their output is short and consistent, so an agent spends fewer tokens on it than on raw CLI output. See https://axi.md.
 
-Each persona or rank declares the AXI tools it uses in an `axi:` line in its frontmatter. The tables above show the mapping:
+Bundled job agents and profiles declare AXI tools in `agent.json`; domain personas may declare them in frontmatter. The tables above show the mapping:
 
 - The lead uses `gh-axi` and `lavish-axi`. The manager uses `quota-axi`. The planner uses `lavish-axi` for the review projection.
 - The driver and the code reviewers use `gh-axi`. The driver never pushes, merges, or creates PRs with it.
@@ -402,23 +416,21 @@ The lead's tool list allows `gh-axi *`, which includes `pr merge`. Only the lead
 
 ## Customizing
 
-### Add a persona
+### Add a project agent
 
-Create a Markdown file in `personas/` with a frontmatter block, which is the text between two `---` lines:
+After `herdr-crew init`, add a directory under `.herdr-crew/agents/` with `AGENTS.md` instructions and `agent.json` metadata:
 
-```markdown
----
-rank: member
-skills: tdd, verification-before-completion
-effort: high
----
-Job instructions go here, in plain sentences.
+```json
+{
+  "name": "payments-reviewer",
+  "description": "Reviews payment code and reports risks.",
+  "profile": "inspector"
+}
 ```
 
-- A job persona needs `rank:`, set to `member` or `inspector`. A domain persona leaves it out.
-- `skills:` and `effort:` are optional. Every listed skill must be installed, so run `install-skills --check`.
-- `axi:` is optional. It lists AXI tools by name, such as `gh-axi`. Each one needs an `<tool> axi npm:<pkg>` line in `skills.sources`, so install-skills can install it.
-- A job only works in a team that lists it, so a new job also needs a team.
+Use an existing profile (`lead`, `manager`, `member`, or `inspector`). Project job metadata accepts only `name`, `description`, `profile`, and optional string-array `skills`/`axi` plus string `effort`; it cannot add tools or change native policy. Write the instructions in `AGENTS.md`. Listed skills must be installed; AXI tools need an `<tool> axi npm:<pkg>` source in `skills.sources` to be installable.
+
+A project team can reference a custom job ID. Fake-runtime fixtures cover its launch and native configuration; live enforcement remains unverified.
 
 ### Add a team
 
@@ -438,12 +450,12 @@ worktree=new
 
 Prefer `herdr-crew configure` for project-specific changes. Editing bundled files changes the installation defaults for projects without overrides.
 
-- Edit `model:` (`opus`, `haiku`, or `inherit`) or `effort:` in the rank file. `inherit` passes no `--model` flag, so Claude Code's default applies.
-- Edit a persona's `effort:` to change one job. It overrides the rank.
+- Edit profile `model` or `effort` in `agents/crew-<profile>/agent.json` to change bundled defaults. `inherit` passes no `--model` flag, so Claude Code's default applies.
+- Edit a bundled job's `effort` in `agents/<job>/agent.json` to change that job's default.
 
 ### Use OpenCode for a rank
 
-Use `herdr-crew configure <rank-or-job> opencode --model provider/model`. OpenCode 2 is required. Legacy rank frontmatter (`kind: opencode`, `opencode_model:`) remains a fallback when no project override applies, with the same version/permission checks. Existing OpenCode sessions without saved native-policy metadata must be relaunched rather than restarted.
+Use `herdr-crew configure <rank-or-job> opencode --model provider/model`. OpenCode 2 is required. Existing OpenCode sessions without saved native-policy metadata must be relaunched rather than restarted.
 
 ## Testing
 
@@ -470,6 +482,8 @@ The test puts fake `herdr`, `tsk`, and `git` commands first on your PATH, and ch
 - A startup warning does not prove a prompt was lost. Inspect the pane and recorded messages before sending anything again.
 - `tsk steps add` rejects newlines and control characters. Record one-line answers or notes; handoff files can contain multiline text.
 - Test concurrency limiting is [research only](docs/research/test-concurrency.md). There is no built `test` or `tests` launcher subcommand or test-rewriting PreToolUse hook.
+- Automatic completion result delivery is not connected to a runtime hook. Agents report through `mark` or `handoff`; task review remains separate from stopping a process.
+- Custom project jobs have fixture-based launch coverage; native permission enforcement and live launches remain unverified.
 - Some skills in `skills.sources` are `UNKNOWN`: `qa-bug-validator`, `react-production-engineering`, `react-component-engineering`, `react-quality-engineering`, `impeccable`, and `context7-mcp`. `install-skills` cannot fetch them, so install them by hand if they go missing.
 
 ## File layout
@@ -482,8 +496,9 @@ herdr-crew/
 │   ├── crew             the launcher (installed as herdr-crew)
 │   ├── ctx-guard        context budget hook (warns at 135K tokens, once per session)
 │   └── install-skills   checks for and installs persona skills
-├── ranks/               four ranks: lead, manager, member, inspector
-├── personas/            job personas and domain personas
+├── agents/              profiles and bundled job instructions with JSON metadata
+├── hooks/               project-copyable lifecycle hook scripts
+├── personas/            stackable domain guidance
 ├── teams/               team layouts (.conf files)
 ├── skills.sources       where each skill comes from, or UNKNOWN
 ├── docs/                current reference, verification state, history, ADRs and research

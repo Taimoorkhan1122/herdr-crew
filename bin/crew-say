@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+[[ $# == 2 ]] || exit 1
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd) || exit 1
+output=$("$root/bin/crew" say "$1" "$2" 2>&1) || { printf '%s\n' "$output" >&2; exit 1; }
+printf '%s\n' "$output" >&2
+[[ "$output" != *"NOT delivered"* ]]

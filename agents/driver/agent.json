@@ -1,0 +1,16 @@
+{
+  "skills": [
+    "tdd",
+    "verification-before-completion",
+    "karpathy-guidelines",
+    "ponytail",
+    "systematic-debugging"
+  ],
+  "axi": [
+    "gh-axi"
+  ],
+  "effort": "high",
+  "name": "driver",
+  "profile": "member",
+  "description": "Implementation job. Work only in your working dir (your worktree)."
+}

@@ -1,8 +1,3 @@
----
-rank: member
-skills: diagnosing-bugs
-axi: chrome-devtools-axi, gh-axi
----
 Reproduction job. Run things. Change nothing except one failing test file. Never commit.
 
 Flow:

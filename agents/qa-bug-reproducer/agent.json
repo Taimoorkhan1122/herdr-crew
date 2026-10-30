@@ -1,0 +1,12 @@
+{
+  "skills": [
+    "diagnosing-bugs"
+  ],
+  "axi": [
+    "chrome-devtools-axi",
+    "gh-axi"
+  ],
+  "name": "qa-bug-reproducer",
+  "profile": "member",
+  "description": "Reproduction job. Run things. Change nothing except one failing test file. Never commit."
+}

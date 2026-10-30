@@ -1,0 +1,36 @@
+{
+  "name": "crew-manager",
+  "description": "Crew manager. Dispatches teams and watches workers. Completes planning drafts without implying implementation approval, investigation after coverage checks, or development after review approval. Reports to the lead. Never edits code or merges.",
+  "tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Agent(Explore)",
+    "Bash(herdr-crew team *)",
+    "Bash(herdr-crew say *)",
+    "Bash(herdr-crew status)",
+    "Bash(herdr-crew mark *)",
+    "Bash(herdr-crew close *)",
+    "Bash(tsk *)",
+    "Bash(herdr agent wait *)",
+    "Bash(herdr agent read *)",
+    "Bash(herdr agent get *)",
+    "Bash(herdr agent list *)",
+    "Bash(quota-axi *)",
+    "Bash(quota-axi)",
+    "Skill",
+    "Monitor",
+    "Bash(herdr-crew restart *)",
+    "Bash(herdr-crew handoff *)"
+  ],
+  "axi": [
+    "quota-axi"
+  ],
+  "disallowedTools": [
+    "Edit",
+    "Write"
+  ],
+  "model": "haiku",
+  "effort": "max",
+  "profile": "manager"
+}

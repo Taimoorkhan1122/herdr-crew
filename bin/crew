@@ -23,22 +23,26 @@ SLUG="${CREW_SLUG:-$(printf %s "$(basename "$REPO")" | tr '[:upper:]' '[:lower:]
 ME="${CREW_AGENT:-user}"
 SDIR="$HOME/.herdr/crew/$SLUG"  # per-crew state: agent meta and briefs (restart), handoff files
 
-rank_file() { echo "$ROOT/ranks/crew-$1.md"; }
-pfile() { echo "$ROOT/personas/$1.md"; }
+project_base() { if [[ -d "${CONFIG_ROOT:-$REPO}/.herdr-crew" ]]; then printf '%s' "${CONFIG_ROOT:-$REPO}/.herdr-crew"; else printf '%s' "$ROOT"; fi; }
+pfile() { echo "$(project_base)/personas/$1.md"; }
+team_dir() { printf '%s/teams' "$(project_base)"; }
+load_definitions() { definitions_load "$(project_base)" || die "invalid project agent definitions"; }
+job_exists() { [[ "$1" =~ ^[a-z][a-z0-9-]*$ && -f "$(project_base)/agents/$1/agent.json" && "$1" != crew-lead && "$1" != crew-manager && "$1" != crew-member && "$1" != crew-inspector ]]; }
+job_meta() { jq -r --arg k "$2" '.[$k] // empty | if type == "array" then join(", ") else . end' "$(project_base)/agents/$1/agent.json"; }
 # fm KEY FILE: frontmatter value
 fm() { awk -v k="$1" 'NR==1&&/^---/{f=1;next} f&&/^---/{exit} f&&$0~"^"k":"{sub("^"k":[ ]*","");print;exit}' "$2"; }
 # body FILE: text after frontmatter
 body() { awk 'NR==1&&/^---/{f=1;next} f&&/^---/{f=0;p=1;next} p' "$1"; }
 # conf TEAM KEY
-conf() { awk -F= -v k="$2" '$1==k{sub("^[^=]*=","");print;exit}' "$ROOT/teams/$1.conf"; }
-persona_rank() { fm rank "$(pfile "$1")"; }
-persona_names() { ls "$ROOT/personas" | sed 's/\.md$//' | tr '\n' ' '; }
+conf() { awk -F= -v k="$2" '$1==k{sub("^[^=]*=","");print;exit}' "$(team_dir)/$1.conf"; }
+persona_rank() { if job_exists "$1"; then job_meta "$1" profile; else fm rank "$(pfile "$1")"; fi; }
+persona_names() { ls "$(project_base)/personas" | sed 's/\.md$//' | tr '\n' ' '; }
 # jobs_for RANK: job personas (those with rank: RANK)
-jobs_for() { local f; for f in "$ROOT"/personas/*.md; do if [[ "$(fm rank "$f")" == "$1" ]]; then basename "$f" .md; fi; done | tr '\n' ' '; }
+jobs_for() { local f id; for f in "$(project_base)"/agents/*/agent.json; do id=${f%/agent.json}; id=${id##*/}; job_exists "$id" || continue; [[ "$(job_meta "$id" profile)" == "$1" ]] && printf '%s ' "$id"; done; return 0; }
 # team_of JOB: team whose members include the job persona
 team_of() {
   local t m
-  for t in "$ROOT"/teams/*.conf; do
+  for t in "$(team_dir)"/*.conf; do
     for m in $(conf "$(basename "$t" .conf)" members); do
       if [[ "$m" == *@"$1" ]]; then basename "$t" .conf; return 0; fi
     done
@@ -48,9 +52,10 @@ team_of() {
 # team_jobs TEAM: job personas of a team
 team_jobs() { local m; for m in $(conf "$1" members); do if [[ "$m" == *@* ]]; then echo "${m#*@}"; fi; done; }
 # all_jobs: job personas of every team
-all_jobs() { local t; for t in "$ROOT"/teams/*.conf; do team_jobs "$(basename "$t" .conf)"; done; }
+all_jobs() { local t; for t in "$(team_dir)"/*.conf; do team_jobs "$(basename "$t" .conf)"; done; }
 # check_domain NAME: must be a domain persona (no rank)
 check_domain() {
+  [[ "$1" =~ ^[a-z][a-z0-9-]*$ ]] || die "invalid persona '$1'"
   [[ -f "$(pfile "$1")" ]] || die "unknown persona '$1'. ranks: $RANKS. personas: $(persona_names)"
   [[ -z "$(persona_rank "$1")" ]] || die "'$1' is a job persona, not a domain persona"
 }
@@ -63,7 +68,8 @@ parse_spec() {
   else plist=$spec
   fi
   for p in $plist; do
-    [[ -f "$(pfile "$p")" ]] || die "unknown persona '$p'. ranks: $RANKS. personas: $(persona_names)"
+    [[ "$p" =~ ^[a-z][a-z0-9-]*$ ]] || die "invalid persona '$p'"
+    [[ -f "$(pfile "$p")" ]] || job_exists "$p" || die "unknown persona '$p'. ranks: $RANKS. personas: $(persona_names)"
     pr=$(persona_rank "$p")
     if [[ -n "$pr" ]]; then
       [[ -z "$JOB" ]] || die "one job persona per spec (got $JOB and $p)"
@@ -85,11 +91,11 @@ parse_spec() {
 agent_name() { echo "$SLUG-$(echo "$1" | tr '[:upper:]' '[:lower:]')-$2" | cut -c1-32; }
 # set_env NAME TASK: fills EV with the CREW_* --env args for the agent that will own the next pane.
 # herdr pane split does not inherit tab env, so every pane gets its own.
-set_env() { EV=(--env "CREW_SLUG=$SLUG" --env "CREW_TASK=$2" --env "CREW_AGENT=$1" --env "CREW_MANAGER=$SLUG-manager" --env "CREW_REPO=$REPO" --env "CREW_WS=${WS:-${CREW_WS:-${HERDR_WORKSPACE_ID:-}}}")
+set_env() { EV=(--env "CREW_SLUG=$SLUG" --env "CREW_TASK=$2" --env "CREW_AGENT=$1" --env "CREW_MANAGER=$SLUG-manager" --env "CREW_CTX_LIMIT=${CREW_CTX_LIMIT:-135000}" --env "CREW_REPO=$REPO" --env "CREW_WS=${WS:-${CREW_WS:-${HERDR_WORKSPACE_ID:-}}}")
   if [[ -n "${3:-}" ]]; then
     agent_selection "$3" "${4:-}"
     if [[ "$AGENT_KIND" == opencode ]]; then
-      EV+=(--env "OPENCODE_CONFIG_CONTENT=$(opencode_config "$3")")
+      EV+=(--env "OPENCODE_CONFIG_CONTENT=$(opencode_config "$3" "${4:-}")")
     fi
   fi
 }
@@ -140,21 +146,26 @@ axi_of() {
 
 # brief NAME RANK TASK TEAMMATES INSTR CWD PERSONAS: prompt text for an agent (PERSONAS: space list, job first)
 brief() {
-  local name=$1 rank=$2 task=$3 mates=$4 instr=$5 cwd=$6 plist=$7 p s a seen="" skills="" bodies="" axi="" axi_line="" budget runtime=""
-  agent_selection "$rank" "${plist%% *}"
+  local name=$1 rank=$2 task=$3 mates=$4 instr=$5 cwd=$6 plist=$7 p s a first=${7%% *} pskills seen="" skills="" bodies="" axi="" axi_line="" budget runtime=""
+  if job_exists "$first"; then agent_selection "$rank" "$first"; else agent_selection "$rank" ""; fi
   budget="A hook warns you when you reach it."
   if [[ "$AGENT_KIND" == opencode ]]; then
     budget="Automatic context warnings are unavailable in this runtime; monitor context and hand off before compaction."
     runtime=$(opencode_guidance)
   fi
-  axi=$(axi_of "$(rank_file "$rank")" $(for p in $plist; do pfile "$p"; done))
+  axi=$(jq -r '.axi // [] | join(" ")' "$(project_base)/agents/crew-$rank/agent.json")
+  for p in $plist; do
+    if job_exists "$p"; then axi="$axi $(job_meta "$p" axi | tr ',' ' ')"; else axi="$axi $(axi_of "$(pfile "$p")")"; fi
+  done
+  axi=$(printf '%s\n' "$axi" | awk '{$1=$1;print}')
   for a in $axi; do
     command -v "$a" >/dev/null 2>&1 || crew_warn "AXI tool '$a' not on PATH (run bin/install-skills)"
   done
   [[ -z "$axi" ]] || axi_line="
 AXI tools (prefer these over raw CLIs; run with no args for a dashboard, follow help[] hints): $(echo $axi | sed 's/ /, /g')"
   for p in $plist; do
-    for s in $(fm skills "$(pfile "$p")" | tr -d ' ' | tr ',' ' '); do
+    if job_exists "$p"; then pskills=$(job_meta "$p" skills); else pskills=$(fm skills "$(pfile "$p")"); fi
+    for s in $(printf '%s' "$pskills" | tr -d ' ' | tr ',' ' '); do
       case " $seen " in *" $s "*) ;; *)
         seen="$seen $s"
         if [[ "$AGENT_KIND" == claude ]]; then skills="$skills /$s"; else skills="$skills $s"; fi ;;
@@ -162,10 +173,10 @@ AXI tools (prefer these over raw CLIs; run with no args for a dashboard, follow 
       # plugin skills (ns:name) live elsewhere; only check user skills
       [[ "$s" == *:* || -f "$HOME/.claude/skills/$s/SKILL.md" || -f "$HOME/.agents/skills/$s/SKILL.md" || -f "$HOME/.config/opencode/skills/$s/SKILL.md" || -f "$cwd/.agents/skills/$s/SKILL.md" ]] || crew_warn "skill '$s' (persona $p) not installed"
     done
-    bodies="$bodies
+    if ! job_exists "$p"; then bodies="$bodies
 Persona ($p):
 $(body "$(pfile "$p")")
-"
+"; fi
   done
   cat <<BRIEF
 You are $name in crew "$SLUG".
@@ -225,19 +236,31 @@ submit() {
 # start_agent NAME RANK PANE TASK BRIEF [JOB]: start agent in pane, then send brief
 # model: rank `model:`; effort: job persona `effort:` > rank `effort:`
 start_agent() {
-  local name=$1 rank=$2 pane=$3 job=${6:-} kind args=() out text model effort settings env_hook
+  local name=$1 rank=$2 pane=$3 job=${6:-} kind args=() out text model effort settings env_hook definition native context_hook="" context_command completion_hook coordinator
   if [[ -n "${7:-}" ]]; then AGENT_JSON=$7; selection_fields; else agent_selection "$rank" "$job"; fi
   kind=$AGENT_KIND; model=$AGENT_MODEL; effort=$AGENT_EFFORT
+  if [[ -n "${8:-}" ]]; then definition=$8; else definition=$(agent_definition "${job:-crew-$rank}") || die "cannot resolve agent definition"; fi
+  mkdir -p "$SDIR" || die "cannot create crew state directory"
+  if [[ -n "${10:-}" ]]; then
+    completion_hook=${10}
+    [[ "$completion_hook" == "$SDIR/$name.task-complete."* && -f "$completion_hook" && ! -L "$completion_hook" ]] || die "invalid saved completion hook; relaunch the team"
+  else completion_hook=$(snapshot_hook "$(project_base)/hooks/task-complete.sh" "$name.task-complete") || die "cannot snapshot project completion hook"; fi
   crew_step "starting $name ($kind${model:+, $model}${effort:+, $effort})"
   if [[ "$kind" == opencode ]]; then
     args=(--kind opencode -- --standalone)
   else
-    args=(--kind claude -- --agent "crew-$rank" -n "$name")
+    native=$(jq -c --arg name "crew-$rank" '{($name): ({description:.description, prompt:(.profileInstructions + (if .id == ("crew-" + .profile) then "" else "\n\n" + .instructions end)), tools:(.tools // []), disallowedTools:(.disallowedTools // [])} + (if .permissionMode then {permissionMode:.permissionMode} else {} end))}' <<<"$definition")
+    args=(--kind claude -- --agent "crew-$rank" -n "$name" --agents "$native")
     [[ -n "$model" && "$model" != inherit ]] && args+=(--model "$model")
     [[ -n "$effort" ]] && args+=(--effort "$effort")
     # ctx-guard warns the agent at the context budget (PostToolUse and UserPromptSubmit)
     env_hook=$(crew_env_hook "$name" "$4")
-    settings=$(jq -nc --arg env_hook "$env_hook" --arg c "$ROOT/bin/ctx-guard" --arg r "$rank" '{hooks:{SessionStart:[{hooks:[{type:"command",command:$env_hook}]}],PostToolUse:[{hooks:[{type:"command",command:$c}]}],UserPromptSubmit:[{hooks:[{type:"command",command:$c}]}]}} + (if $r == "member" then {permissions:{deny:["Bash(git push:*)","Bash(git merge:*)"]}} else {} end)')
+    if [[ -n "${9:-}" ]]; then
+      context_hook=$9
+      [[ "$context_hook" == "$SDIR/$name.context-limit."* && -f "$context_hook" && ! -L "$context_hook" ]] || die "invalid saved context hook; relaunch the team"
+    else context_hook=$(snapshot_hook "$(project_base)/hooks/context-limit.sh" "$name.context-limit") || die "cannot snapshot project context hook"; fi
+    printf -v context_command '%q' "$context_hook"
+    settings=$(jq -nc --arg env_hook "$env_hook" --arg c "$context_command" --arg r "$rank" '{hooks:{SessionStart:[{hooks:[{type:"command",command:$env_hook}]}],PostToolUse:[{hooks:[{type:"command",command:$c}]}],UserPromptSubmit:[{hooks:[{type:"command",command:$c}]}]}} + (if $r == "member" then {permissions:{deny:["Bash(git push:*)","Bash(git merge:*)"]}} else {} end)')
     # members: push and merge are denied here, not in agent disallowedTools (a Bash pattern there removed all of Bash)
     args+=(--settings "$settings")
   fi
@@ -255,9 +278,21 @@ start_agent() {
   fi
   # Save only after startup succeeds; a rejected duplicate name must keep its old state.
   mkdir -p "$SDIR"
-  printf 'rank=%s\njob=%s\npane=%s\ntask=%s\nselection=%s\n' "$rank" "$job" "$pane" "$4" "$AGENT_JSON" >"$SDIR/$name.meta"
+  coordinator="$SLUG-manager"
+  [[ "$name" != "$SLUG-manager" ]] || coordinator="$SLUG-lead"
+  printf 'rank=%s\njob=%s\npane=%s\ntask=%s\nselection=%s\ncoordinator=%s\ncontext_hook=%s\ncompletion_hook=%s\n' "$rank" "$job" "$pane" "$4" "$AGENT_JSON" "$coordinator" "$context_hook" "$completion_hook" >"$SDIR/$name.meta"
   printf '%s\n' "$5" >"$SDIR/$name.brief"
+  printf '%s\n' "$definition" >"$SDIR/$name.definition"
   submit "$name" "$5"
+}
+
+# snapshot_hook SOURCE PREFIX: copy a project hook to a unique session path without replacing prior bytes.
+snapshot_hook() {
+  local source=$1 prefix=$2 snapshot
+  [[ -f "$source" && ! -L "$source" ]] || return 1
+  snapshot=$(mktemp "$SDIR/$prefix.XXXXXX") || return 1
+  if ! cp "$source" "$snapshot" || ! chmod 700 "$snapshot"; then rm -f "$snapshot"; return 1; fi
+  printf '%s' "$snapshot"
 }
 
 cmd_launch() {
@@ -339,7 +374,8 @@ cmd_team() {
       *) instr=$1; shift ;;
     esac
   done
-  [[ -f "$ROOT/teams/$team.conf" ]] || die "no team '$team'. teams: $(teams_list)"
+  [[ "$team" =~ ^[a-z][a-z0-9-]*$ ]] || die "invalid team '$team'"
+  [[ -f "$(team_dir)/$team.conf" ]] || die "no team '$team'. teams: $(teams_list)"
   for e in $pmap; do
     doms=${e#*=}
     case " $(team_jobs "$team" | tr '\n' ' ')" in *" ${e%%=*} "*) ;; *) die "team '$team' has no job '${e%%=*}'. jobs: $(team_jobs "$team" | tr '\n' ' ')" ;; esac
@@ -421,10 +457,31 @@ cmd_say() {
 }
 
 cmd_mark() {
-  local T=$1 st=$2 note=$3
+  local T=$1 st=$2 note=$3 result tmp coordinator completion_hook
+  [[ "$T" =~ ^T[0-9]+$ && "$ME" =~ ^[a-zA-Z0-9_-]+$ ]] || die "invalid task or agent identity"
+  case "$st" in ready|started|blocked|review|done) ;; *) die "invalid task status '$st'" ;; esac
+  [[ -n "$note" ]] || die "mark requires a non-empty note"
+  [[ ! -L "$SDIR" ]] || die "refusing symlink crew state directory"
+  mkdir -p "$SDIR" || die "cannot create crew state directory"
+  result="$SDIR/$ME.result.json"
+  [[ ! -L "$result" ]] || die "refusing symlink result file"
+  tmp=$(mktemp "$SDIR/.result.XXXXXX") || die "cannot write task result"
+  if ! jq -n --arg agent "$ME" --arg task "$T" --arg status "$st" --arg note "$note" '{agent:$agent,task:$task,status:$status,note:$note}' >"$tmp"; then
+    rm -f "$tmp"
+    die "cannot encode task result"
+  fi
+  mv -f "$tmp" "$result" || { rm -f "$tmp"; die "cannot save task result"; }
   mut tsk status "$T" "$st"
   mut tsk steps "$T" add "$note"
   mut herdr pane report-metadata "${HERDR_PANE_ID:-none}" --source crew --title "$T $ME: $note"
+  case "$st" in blocked|review|done)
+    coordinator=$(sed -n 's/^coordinator=//p' "$SDIR/$ME.meta" 2>/dev/null | head -1)
+    completion_hook=$(sed -n 's/^completion_hook=//p' "$SDIR/$ME.meta" 2>/dev/null | head -1)
+    [[ "$coordinator" =~ ^[a-zA-Z0-9_-]+$ ]] || coordinator=${CREW_MANAGER:-}
+    if [[ "$coordinator" =~ ^[a-zA-Z0-9_-]+$ && "$completion_hook" == "$SDIR/$ME.task-complete."* && -f "$completion_hook" && ! -L "$completion_hook" ]]; then
+      /bin/bash "$completion_hook" "$result" "$ME" "$T" "$coordinator" "$SDIR" "$ROOT/bin/crew-say" || crew_warn "completion notification failed; result saved for retry"
+    else crew_warn "completion coordinator is unavailable; result saved for retry"; fi ;;
+  esac
 }
 
 # show_agent NAME: one line "name<TAB>state" when the agent exists
@@ -544,9 +601,9 @@ cmd_handoff() {
 }
 
 # restart_one NAME: /exit the agent, wait for its pane to reach the shell, start it again from its saved meta and brief.
-# The brief gets a resume line when a handoff exists. The handoff is renamed after the new agent starts.
+# The brief gets a resume line when a handoff exists; keep that path readable.
 restart_one() {
-  local name=$1 rank job pane task i ready="" pi handoff brief selection
+  local name=$1 rank job pane task i ready="" pi handoff brief selection definition context_hook completion_hook
   [[ -f "$SDIR/$name.meta" && -f "$SDIR/$name.brief" ]] || die "no saved state for $name (start it with herdr-crew first)"
   rank=$(sed -n 's/^rank=//p' "$SDIR/$name.meta"); job=$(sed -n 's/^job=//p' "$SDIR/$name.meta")
   pane=$(sed -n 's/^pane=//p' "$SDIR/$name.meta"); task=$(sed -n 's/^task=//p' "$SDIR/$name.meta")
@@ -560,6 +617,11 @@ restart_one() {
     config_load; agent_selection "$rank" "$job"; selection=$AGENT_JSON
     [[ "$AGENT_KIND" == claude ]] || die "legacy OpenCode session has no native crew policy; relaunch the team instead of restarting"
   fi
+  [[ -f "$SDIR/$name.definition" && ! -L "$SDIR/$name.definition" ]] || die "missing saved definition; relaunch the team"
+  definition=$(cat "$SDIR/$name.definition") || die "cannot read saved definition; relaunch the team"
+  context_hook=$(sed -n 's/^context_hook=//p' "$SDIR/$name.meta")
+  completion_hook=$(sed -n 's/^completion_hook=//p' "$SDIR/$name.meta")
+  jq -se --arg rank "$rank" --arg id "${job:-crew-$rank}" 'length == 1 and (.[0] | type == "object" and .id == $id and .profile == $rank and (.description | type == "string") and (.profileInstructions | type == "string") and (.instructions | type == "string") and (.tools | type == "array" and all(.[]; type == "string")) and (if has("disallowedTools") then .disallowedTools | type == "array" and all(.[]; type == "string") else true end))' <<<"$definition" >/dev/null 2>&1 || die "invalid saved definition; relaunch the team"
   agent_check
   mut herdr agent prompt "$name" /exit >/dev/null || true
   if [[ -z "${CREW_DRY_RUN:-}" ]]; then
@@ -573,8 +635,8 @@ restart_one() {
   handoff="$SDIR/handoff-$name.md"
   brief=$(sed '/^Resume from your handoff: /d' "$SDIR/$name.brief")  # drop the resume line of an earlier restart
   if [[ -f "$handoff" ]]; then brief="$brief"$'\n'"Resume from your handoff: $handoff. Read it first. The board and the handoff show work already done: do not redo it, and do not create tasks that already exist."; fi
-  start_agent "$name" "$rank" "$pane" "$task" "$brief" "$job" "$selection"
-  if [[ -f "$handoff" ]]; then mv "$handoff" "$SDIR/handoff-$name.$(date +%s).md"; fi
+  start_agent "$name" "$rank" "$pane" "$task" "$brief" "$job" "$selection" "$definition" "$context_hook" "$completion_hook"
+  # Keep the referenced handoff readable for the restarted agent.
   crew_out "restarted $name"
 }
 
@@ -592,6 +654,8 @@ cmd_restart() {
 }
 
 # Configuration is local and works without Herdr or tsk installed.
+source "$ROOT/lib/agent-definitions.sh"
+source "$ROOT/lib/project-config.sh"
 source "$ROOT/lib/agent-config.sh"
 
 # Global options come before the command, so an instruction can never look like one.
@@ -617,9 +681,16 @@ if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then show_help "$sub"; exit 0; fi
 [[ "$sub" == completion ]] && { cmd_completion "$@"; exit 0; }
 command -v jq >/dev/null || die "jq not found on PATH (install: brew install jq)"
 if [[ "$sub" == configure ]]; then cmd_configure "$@"; exit; fi
+if [[ "$sub" == init || "$sub" == upgrade ]]; then project_command "$sub" "$@"; exit; fi
 for c in tsk herdr; do command -v "$c" >/dev/null || die "$c not found on PATH (tsk: brew install smarzban/tap/tsk; herdr: install Herdr first)"; done
 case "$sub" in
-  launch|team) config_load ;;
+  launch|team)
+    project_root
+    if [[ ! -f "$CONFIG_ROOT/.herdr-crew/baseline.json" && -z "${CREW_DRY_RUN:-}" ]]; then
+      project_command init >/dev/null
+    fi
+    config_load
+    load_definitions ;;
 esac
 case "$sub" in
   launch)  cmd_launch "$@" ;;

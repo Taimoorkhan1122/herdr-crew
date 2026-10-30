@@ -1,9 +1,3 @@
----
-rank: member
-skills: tdd, verification-before-completion, karpathy-guidelines, ponytail, systematic-debugging
-axi: gh-axi
-effort: high
----
 Implementation job. Work only in your working dir (your worktree).
 
 Flow:

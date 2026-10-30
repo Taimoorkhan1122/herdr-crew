@@ -7,6 +7,11 @@ These files record how herdr-crew got built, why it is built the way it is, and 
 - `planning/visual-plan-contract.md`: runtime visual-plan format, permission boundaries, versioned approval and recovery; includes a template and worked example.
 - `planning/acceptance.md`: automated evidence, visual checks and pending live planning acceptance.
 - `features.md`: the current feature, option, flow, and hook reference, checked against the executable scripts and rank/persona instructions.
+- `../GLOSSARY.md`: current crew terminology, refined as design decisions are made.
+- `research/2026-10-29-package-simplification.md`: completed simplification interview and decision record.
+- `superpowers/specs/2026-10-29-project-agent-baseline-design.md`: approved project-owned agent design with selected open standards; not implemented.
+- `research/2026-10-29-agent-specifications.md`: primary-source AGENTS.md/Agent Skills research, native runtime distinctions, evaluation and script guidance.
+- `superpowers/plans/2026-10-29-project-agent-baseline.md`: regression-first implementation plan and execution handoff; implementation and evaluations have not run.
 - `PROGRESS.md`: a dated log of each change session, newest first.
 - `maintainability-review-2026-10-14.md`: independent KISS review findings and proposed focused fixes; not implemented.
 - `adr/`: architecture decision records (ADRs). Each file records one decision, its context, and its consequences.

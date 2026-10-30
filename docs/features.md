@@ -1,6 +1,6 @@
 # Current feature reference
 
-Checked against the scripts, team configurations, ranks, and personas on 2026-10-27. This inventory describes built behavior. [STATE.md](STATE.md) records which behavior has automated or live evidence. The [README](../README.md) provides the user walkthrough.
+Checked against the implementation worktree on 2026-10-30. The project-owned baseline and agent registry are present; hook integration and final whole-change verification remain in progress. This inventory describes source behavior, not live acceptance. [STATE.md](STATE.md) records evidence and open gaps. The [README](../README.md) provides the user walkthrough.
 
 ## Commands and options
 
@@ -10,6 +10,8 @@ The launcher is [bin/crew](../bin/crew). Runtime commands require tsk, jq, and h
 
 | Command | Inputs and behavior |
 |---|---|
+| `init [--json]` | Creates the primary project's `.herdr-crew/` baseline, preserving existing files. Imports valid legacy `.herdr-crew.json` assignments only when no new config exists; keeps the old file. First `launch`/`team` initializes automatically. `--dry-run init` writes nothing. |
+| `upgrade [--json] [--apply PATH --expect SOURCE_SHA256 --expect-target TARGET_SHA256_OR_absent]...` | Without `--apply`, previews differing baseline paths and their source/target hashes. Applies only explicitly selected paths whose two hashes still match the preview; updates only their provenance entries. |
 | `configure [--interactive \| --show \| ROLE AGENT [--model MODEL] [--effort EFFORT]]` | Human wizard or noninteractive per-project assignment; shows effective rank/job settings. Supports Claude and OpenCode 2. EOF cancels the wizard; invalid input leaves the file unchanged. `all` sets four rank defaults and preserves job overrides. |
 | `launch <spec> -` | Reads instructions from stdin. Without `-`, remaining words are instructions. Empty instructions fail. `lead` starts Lead, Manager, and board; a job creates a ready tsk task and starts its configured team. |
 | `team <team> <T#> [--persona <job>=<domain>[+<domain>]]... ["instructions"]` | Starts an existing task's team. Repeat `--persona` for different slots. Explicit instructions override task notes in the brief. With no instructions, reads task notes. |
@@ -41,14 +43,20 @@ Global options must come before the command, so instructions can never be read a
 
 Spec forms are `lead`, `<rank>@<job>[+<domain>]`, or a bare job. `lead@<domain>` also uses the parser's domain composition. One job is allowed per spec, and its rank must match. Unknown names and invalid team persona slots fail before launch mutations. A fresh code-reviewer launch is refused because it lacks an existing pair branch.
 
-## Configuration and identity
+## Project baseline, definitions and identity
 
-- [ranks/](../ranks/) sets permissions, model, effort, and communication rules: Lead opus/high, Manager haiku/max, member haiku/high, inspector haiku/xhigh. Model aliases resolve through the native runtime.
-- [personas/](../personas/) defines eight jobs: driver, navigator, tester, code-reviewer, qa-bug-triager, qa-bug-reproducer, investigator, planner. Five domains are pragmatic-senior, nestjs-expert, react-expert, ui-expert, security-paranoid. Default domain is pragmatic-senior.
-- Persona `rank:` defines a job; domains omit it. Optional `skills:` and `axi:` are merged into the brief. A job's `effort:` overrides rank effort. A domain's effort does not set the launch effort.
-- `.herdr-crew.json` (`version: 1`, `roles` keyed by rank/job) in the primary project checkout sets `agent` and optional `model`/`effort`. Linked worktrees share even uncommitted settings. Separated Git metadata uses the verified primary top-level; ambiguous manually entered linked checkouts require `CREW_REPO` pointing to the primary checkout (already set for crew-created workers). Job overrides beat rank overrides, which beat bundled defaults. Switching agent clears the previous runtime's inherited model/effort; changing an OpenCode model clears its inherited variant; `inherit` omits the flag explicitly. No user-wide override is read.
+- Installed definitions are in `agents/<id>/{AGENTS.md,agent.json}`. The four `crew-*` directories define the existing permission profiles; bundled jobs reference one of those profiles. Metadata is validated JSON, and job definitions cannot supply tools, permission modes or other policy overrides. `personas/` holds stackable domain guidance.
+- `init` copies missing files from `agents/`, `personas/`, `teams/` and `hooks/` into the primary project's `.herdr-crew/`. `.herdr-crew/config.json` stores runtime assignments and `baseline.json` records source version and applied file hashes. Existing custom files are skipped. Valid `.herdr-crew.json` is imported only on first initialization and retained byte-for-byte; if both formats exist, the new directory is used and the legacy file is reported.
+- `upgrade` is an explicit preview/apply flow. Preview includes both installed-source and project-target hashes. Every `--apply` must provide both reviewed values (`absent` for a missing target); drift fails before replacement. The selected path and its provenance hash are updated; unselected paths remain untouched. Writes use staging, validation, a project lock and a recovery copy. A recovery directory may remain after successful replacement.
+- `launch` and `team` initialize a missing or partial project baseline automatically. Initialization does not install runtimes or skills. `configure` uses `.herdr-crew/config.json` and accepts discovered project agent IDs. Native enforcement and live launches remain unverified.
+
+## Runtime configuration and identity
+
+- [agents/](../agents/) defines the four permission profiles and bundled jobs. Profiles carry native tools/permissions and bundled defaults; jobs carry profile selection, skills, AXI tools and effort. Project jobs may customize guidance but not profile policy. The validated registry combines profile policy metadata with job instructions. Native launcher integration for project-specific definitions is still in progress; source presence and fake adapter assertions do not establish that a custom project agent is selected in a runtime.
+- [personas/](../personas/) contains five stackable domains: pragmatic-senior, nestjs-expert, react-expert, ui-expert and security-paranoid. Default domain is pragmatic-senior.
+- `.herdr-crew/config.json` (`version: 1`, `roles` keyed by profile alias or agent ID) in the primary project checkout sets `agent` and optional `model`/`effort`. Linked worktrees share even uncommitted settings. Separated Git metadata uses the verified primary top-level; ambiguous manually entered linked checkouts require `CREW_REPO` pointing to the primary checkout (already set for crew-created workers). Agent settings override profile defaults. Switching agent clears the previous runtime's inherited model/effort; changing an OpenCode model clears its inherited variant; `inherit` omits the flag explicitly. No user-wide override is read.
 - `claude` and `opencode` (major 2) have native adapters. Other Herdr kinds are rejected. OpenCode effort selects a model-specific catalog variant; a non-default effort requires an explicit model. The wizard supports numbered or searchable model selection and offers only that model's variants. Catalog lookup uses `opencode api --standalone model.list` in the primary checkout, without creating an agent session or generating model output. The root model stays unqualified; the crew agent gets `provider/model#variant`. Configuration errors, missing binaries and unsupported versions are checked before new launch resources. `configure --show` does not check credentials/model availability.
-- Legacy rank `kind: opencode` / `opencode_model:` remains a fallback with the same native adapter checks. Claude uses rank `model:` and job/rank effort unless overridden. Restart retains resolved settings; legacy Claude metadata resolves through current config, while legacy OpenCode metadata without a native session policy is refused.
+- Restart retains the saved resolved definition and runtime selection; edits affect new launches. Legacy OpenCode sessions without a native session policy are refused on restart.
 - [teams/](../teams/) defines members and worktree modes. The first member gets the root pane; later members split from it. `launch lead` has a special Lead/Manager/board layout.
 - Slug: six normalized repo-name characters plus four path-hash characters, prefixed with `x` if needed. Worker names contain slug, lowercase task number, and job, truncated to 32 characters. Long customized names can collide; uniqueness is checked by Herdr at startup.
 - Saved state lives at `~/.herdr/crew/<slug>/`: `<agent>.meta`, `<agent>.brief`, handoff files, and context-warning markers. This is separate from tsk's task storage.
@@ -104,15 +112,15 @@ Every created pane explicitly receives CREW_SLUG, CREW_TASK, CREW_AGENT, CREW_MA
 
 ## Hooks and startup recovery
 
-These hooks are Claude-only, passed as per-session `--settings`; they do not install global hooks.
+The launcher snapshots project-owned hooks per session and registers the Claude context hook with `--settings`; it does not install global hooks. Explicit `mark` saves a result and invokes the saved completion hook to notify the coordinator. Failed delivery remains retryable. A crash after delivery but before the success marker can repeat a notification; a stale lock can also require intervention.
 
 | Hook | Built behavior and limit |
 |---|---|
 | SessionStart | Appends shell-quoted exports for the six crew variables to CLAUDE_ENV_FILE when available. Restores Bash environment on startup/resume. |
-| PostToolUse | Runs [bin/ctx-guard](../bin/ctx-guard). Reads the last main-thread assistant usage in the last 400 transcript lines: input + cache-read + cache-creation tokens. Subagent usage is excluded. |
-| UserPromptSubmit | Runs the same guard. At or above CREW_CTX_LIMIT, writes a per-session marker and emits a handoff instruction once. |
+| PostToolUse | Runs the saved project context hook. Reads the last main-thread assistant usage in the last 400 transcript lines: input + cache-read + cache-creation tokens. Subagent usage is excluded. |
+| UserPromptSubmit | Runs the same guard. At or above `CREW_CTX_LIMIT`, writes a per-session marker and emits a handoff instruction once. The launcher default is 135000 tokens. |
 
-The guard always exits 0. Missing or invalid usage becomes zero; a transcript-format change can therefore suppress warnings. It requests handoff but does not force termination or impose a billing limit. There is no built test-rewriting PreToolUse hook.
+The registered guard always exits 0. Missing or invalid usage becomes zero; a transcript-format change can therefore suppress warnings. It requests handoff but does not force termination or impose a billing limit. OpenCode has no registered context hook. Task completion is still explicit via `mark`/`handoff`; a process stop or a standalone result file is not accepted completion. There is no built test-rewriting PreToolUse hook.
 
 Startup uses native rank/model/effort flags. The launcher can answer a recognized Claude trust dialog in a pane it started. Registry names are reclaimed only after the previous pane reaches its shell. Brief submission checks working/blocked/done; visible pasted text can receive another Enter. Ambiguous input is not resent. A warning requires inspection before any retry.
 
@@ -120,13 +128,15 @@ Startup uses native rank/model/effort flags. The launcher can answer a recognize
 
 [bin/install-skills](../bin/install-skills) accepts `--check`, `-y`/`--yes`, and `-h`/`--help`. Unknown options exit 2. A successful check exits 0; missing, blocked, skipped, or failed required items produce exit 1.
 
-It combines persona skills with all skill names in [skills.sources](../skills.sources), then checks AXI declarations in ranks/personas. It can link a skill from `~/.agents/skills`, replace a broken link after approval, fetch a verified repository skill, install a declared plugin, or install a missing AXI package through npm. Existing paths without SKILL.md are retained and reported blocked. UNKNOWN sources require manual installation. Approval defaults to No and reads `/dev/tty`; `--yes` accepts all prompts. `--check` does not install or link anything.
+It combines skill/AXI metadata in `agents/*/agent.json` with domain persona declarations and all skill names in [skills.sources](../skills.sources). It can link a skill from `~/.agents/skills`, replace a broken link after approval, fetch a verified repository skill, install a declared plugin, or install a missing AXI package through npm. Existing paths without SKILL.md are retained and reported blocked. UNKNOWN sources require manual installation. Approval defaults to No and reads `/dev/tty`; `--yes` accepts all prompts. `--check` does not install or link anything.
 
 ## Documentation and verification map
 
 - [README](../README.md): usage, rank/persona/team tables, customization, examples, limits.
 - [SKILL](../SKILL.md): agent entry point and launch instructions.
 - [STATE](STATE.md): current verification scope and open issues. [PROGRESS](PROGRESS.md): dated history.
+- [Project-agent evaluation procedure](research/project-agent-evaluation.md) and [evaluation cases](../evals/evals.json): three unrun model-driven comparisons; fixtures are not evaluation results.
+- `test/agent-definitions.sh`, `test/project-baseline.sh`, `test/project-launch.sh`, and hook fixtures: automated validation of metadata, setup/upgrade safety, fake native adapter output and hook behavior. These do not prove a live provider session or native enforcement.
 - `test/agent-config.sh`: real Git and disposable HOME with fake runtime executables; configuration, wizard cancellation, policy/argv, preflight and pinned restart coverage. No live agent behavior.
 - [ADRs](adr/): historical decisions, including models, permissions, worktrees, communication, installation, AXI, lifecycle, hooks, and Q&A.
 - [Q&A plan](superpowers/plans/2026-10-14-project-qa.md): intended behavior, execution results, and remaining acceptance gaps.

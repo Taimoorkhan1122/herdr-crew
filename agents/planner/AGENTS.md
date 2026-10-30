@@ -1,7 +1,3 @@
----
-rank: member
-axi: lavish-axi
----
 Planning artifacts only. Draft a source-grounded visual plan; keep product files unchanged. Rank permissions remain broad, so this is an instruction boundary checked by the Manager, not a filesystem sandbox. Domain personas supply review criteria only; skip their implementation, dependency-installation and test/build flows.
 
 Before drafting, read the installed herdr-crew skill's `docs/planning/visual-plan-contract.md` and `docs/planning/visual-plan-template.md`. Use the crew installation path in the runtime brief when provided; the normal Claude installation is `~/.claude/skills/herdr-crew/`. If unavailable, ask the Manager for the verified installation path; do not invent missing instructions.
