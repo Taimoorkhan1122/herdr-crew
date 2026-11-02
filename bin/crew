@@ -301,7 +301,7 @@ submit_term() {
     info=$(hc get "$terminal" --json 2>/dev/null || true)
     status=$(jq -r '.status.state // empty' <<<"$info" 2>/dev/null || true)
     turn=$(jq -r '.turn // empty' <<<"$info" 2>/dev/null || true)
-    if [[ "$status" == working ]] || [[ "$turn" =~ ^[0-9]+$ && "$before_turn" =~ ^[0-9]+$ ]] && (( turn > before_turn )); then
+    if [[ "$status" == working ]] || { [[ "$turn" =~ ^[0-9]+$ && "$before_turn" =~ ^[0-9]+$ ]] && (( turn > before_turn )); }; then
       return 0
     fi
   done
@@ -312,7 +312,7 @@ submit_term() {
     info=$(hc get "$terminal" --json 2>/dev/null || true)
     status=$(jq -r '.status.state // empty' <<<"$info" 2>/dev/null || true)
     turn=$(jq -r '.turn // empty' <<<"$info" 2>/dev/null || true)
-    if [[ "$status" == working ]] || [[ "$turn" =~ ^[0-9]+$ && "$before_turn" =~ ^[0-9]+$ ]] && (( turn > before_turn )); then
+    if [[ "$status" == working ]] || { [[ "$turn" =~ ^[0-9]+$ && "$before_turn" =~ ^[0-9]+$ ]] && (( turn > before_turn )); }; then
       return 0
     fi
   fi

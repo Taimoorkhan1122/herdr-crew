@@ -692,6 +692,17 @@ rc=0; out=$("$CREW" completion 2>&1) || rc=$?
   (( rc != 0 )) && in_out "send: exit 3 fails launch" "terminal t1 is gone" "$out" || flunk "send: exit 3 rc=$rc ($out)"
 
   ready_reset
+  touch "$READY_STATE/keep-turn-on-create"
+  rc=0; out=$(run_ready team investigate T7 "working status is sufficient" 2>&1) || rc=$?
+  if (( rc == 0 )) && [[ "$out" != *"did not start after brief submission"* ]] \
+    && [[ -s "$READY_STATE/sent.t1" ]] \
+    && jq -e '.status == "working" and .turn == 0' "$READY_STATE/term.t1" >/dev/null; then
+    pass "send: working status succeeds without a turn change"
+  else
+    flunk "send: working without turn change rc=$rc ($out)"
+  fi
+
+  ready_reset
   touch "$READY_STATE/swallow-send-on-create"
   rc=0; out=$(run_ready team investigate T7 "retry Enter" 2>&1) || rc=$?
   (( rc == 0 )) && pass "paste: swallowed Enter recovers first brief" || flunk "paste: launch rc=$rc ($out)"

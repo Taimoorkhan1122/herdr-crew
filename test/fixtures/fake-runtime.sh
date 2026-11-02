@@ -77,6 +77,9 @@ case "$command" in
     printf '%s\n' "$message" >>"$STATE/sent.$terminal"
     if [[ $(jq -r '.swallow // false' "$STATE/term.$terminal") == true ]]; then
       printf '%s\n' "$message" >"$STATE/screen.$terminal"
+    elif [[ $(jq -r '.keepTurn // false' "$STATE/term.$terminal") == true ]]; then
+      jq '.status = "working"' "$STATE/term.$terminal" >"$STATE/term.$terminal.tmp"
+      mv "$STATE/term.$terminal.tmp" "$STATE/term.$terminal"
     else
       jq '.status = "working" | .turn = ((.turn // 0) + 1)' "$STATE/term.$terminal" >"$STATE/term.$terminal.tmp"
       mv "$STATE/term.$terminal.tmp" "$STATE/term.$terminal"
@@ -150,11 +153,12 @@ next_id() {
 }
 new_terminal() {
   local terminal=$1 pane=$2 argv=$3 space=$4 tab=$5 name=$6
-  local status=null send_exit=0 swallow=false
+  local status=null send_exit=0 swallow=false keep_turn=false
   [[ ! -f "$STATE/status-on-create" ]] || status=$(cat "$STATE/status-on-create")
   [[ ! -f "$STATE/send-exit-on-create" ]] || send_exit=$(cat "$STATE/send-exit-on-create")
   [[ ! -f "$STATE/swallow-send-on-create" ]] || swallow=true
-  jq -n --arg address "$terminal" --arg pane "$pane" --arg space "$space" --arg tab "$tab" --arg name "$name" --arg status "$status" --argjson argv "$argv" --argjson send_exit "$send_exit" --argjson swallow "$swallow" '{agent:$name,status:(if $status == "null" then null else $status end),state:"running",turn:0,sendExit:$send_exit,swallow:$swallow,argv:$argv,labels:{"herdr.space":$space,"herdr.tab":$tab},pid:null,address:$address,pane:$pane}' >"$STATE/term.$terminal"
+  [[ ! -f "$STATE/keep-turn-on-create" ]] || keep_turn=true
+  jq -n --arg address "$terminal" --arg pane "$pane" --arg space "$space" --arg tab "$tab" --arg name "$name" --arg status "$status" --argjson argv "$argv" --argjson send_exit "$send_exit" --argjson swallow "$swallow" --argjson keep_turn "$keep_turn" '{agent:$name,status:(if $status == "null" then null else $status end),state:"running",turn:0,sendExit:$send_exit,swallow:$swallow,keepTurn:$keep_turn,argv:$argv,labels:{"herdr.space":$space,"herdr.tab":$tab},pid:null,address:$address,pane:$pane}' >"$STATE/term.$terminal"
   [[ ! -f "$STATE/status-sequence-on-create" ]] || cp "$STATE/status-sequence-on-create" "$STATE/get-seq.$terminal"
   [[ ! -f "$STATE/screen-on-create" ]] || cp "$STATE/screen-on-create" "$STATE/screen.$terminal"
 }
