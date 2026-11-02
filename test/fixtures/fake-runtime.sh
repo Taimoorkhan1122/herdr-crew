@@ -25,13 +25,28 @@ case "$command" in
   get)
     terminal=${1:-}; shift || true
     has_term "$terminal" || missing
+    if [[ -f "$STATE/get-seq.$terminal" ]]; then
+      next=$(head -1 "$STATE/get-seq.$terminal")
+      sed '1d' "$STATE/get-seq.$terminal" >"$STATE/get-seq.$terminal.tmp"
+      mv "$STATE/get-seq.$terminal.tmp" "$STATE/get-seq.$terminal"
+      if [[ "$next" == null ]]; then
+        jq '.status = null' "$STATE/term.$terminal" >"$STATE/term.$terminal.tmp"
+      else
+        jq --arg status "$next" '.status = $status' "$STATE/term.$terminal" >"$STATE/term.$terminal.tmp"
+      fi
+      mv "$STATE/term.$terminal.tmp" "$STATE/term.$terminal"
+    elif [[ -f "$STATE/auto-ready" ]] && [[ $(jq -r '.status // empty' "$STATE/term.$terminal") == "" ]]; then
+      jq '.status = "idle"' "$STATE/term.$terminal" >"$STATE/term.$terminal.tmp"
+      mv "$STATE/term.$terminal.tmp" "$STATE/term.$terminal"
+    fi
     jq -nc --arg address "$terminal" --argjson term "$(cat "$STATE/term.$terminal")" '{
       address: $address,
       state: ($term.state // "running"),
       status: (if ($term.status // null) == null then null else {state: $term.status} end),
       labels: ($term.labels // {}),
       argv: ($term.argv // []),
-      pid: ($term.pid // null)
+      pid: ($term.pid // null),
+      turn: ($term.turn // 0)
     }'
     ;;
   ls)
@@ -51,6 +66,22 @@ case "$command" in
       printf '{"error":{"kind":"blocked"}}\n' >&2
       exit 9
     fi
+    send_exit=$(jq -r '.sendExit // 0' "$STATE/term.$terminal")
+    if [[ "$send_exit" == 9 ]]; then
+      printf '{"error":{"kind":"blocked"}}\n' >&2
+      exit 9
+    elif [[ "$send_exit" == 3 ]]; then
+      missing
+    fi
+    message=${1:-}
+    printf '%s\n' "$message" >>"$STATE/sent.$terminal"
+    if [[ $(jq -r '.swallow // false' "$STATE/term.$terminal") == true ]]; then
+      printf '%s\n' "$message" >"$STATE/screen.$terminal"
+    else
+      jq '.status = "working" | .turn = ((.turn // 0) + 1)' "$STATE/term.$terminal" >"$STATE/term.$terminal.tmp"
+      mv "$STATE/term.$terminal.tmp" "$STATE/term.$terminal"
+    fi
+    printf '{"started":true}\n'
     ;;
   keys|read|wait|kill|label)
     terminal=${1:-}; shift || true
@@ -58,6 +89,16 @@ case "$command" in
     case "$command" in
       read)
         cat "$STATE/screen.$terminal" 2>/dev/null || true
+        ;;
+      keys)
+        keys="$*"
+        if [[ "$keys" == "down enter" ]] && rg -qiF 'trust this folder' "$STATE/screen.$terminal" 2>/dev/null; then
+          jq '.status = "idle"' "$STATE/term.$terminal" >"$STATE/term.$terminal.tmp"
+          mv "$STATE/term.$terminal.tmp" "$STATE/term.$terminal"
+        elif [[ "$keys" == enter && $(jq -r '.swallow // false' "$STATE/term.$terminal") == true ]]; then
+          jq '.status = "working" | .turn = ((.turn // 0) + 1)' "$STATE/term.$terminal" >"$STATE/term.$terminal.tmp"
+          mv "$STATE/term.$terminal.tmp" "$STATE/term.$terminal"
+        fi
         ;;
       wait)
         jq -nc --arg address "$terminal" --argjson term "$(cat "$STATE/term.$terminal")" '{address:$address,state:($term.state // "running"),status:(if ($term.status // null) == null then null else {state:$term.status} end),labels:($term.labels // {}),argv:($term.argv // []),pid:($term.pid // null)}'
@@ -79,6 +120,11 @@ case "$command" in
     exit 2
     ;;
 esac
+SH
+
+  cat >"$fake/sleep" <<'SH'
+#!/usr/bin/env bash
+exit 0
 SH
 
   cat >"$fake/herdr-app" <<'SH'
@@ -104,7 +150,13 @@ next_id() {
 }
 new_terminal() {
   local terminal=$1 pane=$2 argv=$3 space=$4 tab=$5 name=$6
-  jq -n --arg address "$terminal" --arg pane "$pane" --arg space "$space" --arg tab "$tab" --arg name "$name" --argjson argv "$argv" '{agent:$name,status:null,state:"running",argv:$argv,labels:{"herdr.space":$space,"herdr.tab":$tab},pid:null,address:$address,pane:$pane}' >"$STATE/term.$terminal"
+  local status=null send_exit=0 swallow=false
+  [[ ! -f "$STATE/status-on-create" ]] || status=$(cat "$STATE/status-on-create")
+  [[ ! -f "$STATE/send-exit-on-create" ]] || send_exit=$(cat "$STATE/send-exit-on-create")
+  [[ ! -f "$STATE/swallow-send-on-create" ]] || swallow=true
+  jq -n --arg address "$terminal" --arg pane "$pane" --arg space "$space" --arg tab "$tab" --arg name "$name" --arg status "$status" --argjson argv "$argv" --argjson send_exit "$send_exit" --argjson swallow "$swallow" '{agent:$name,status:(if $status == "null" then null else $status end),state:"running",turn:0,sendExit:$send_exit,swallow:$swallow,argv:$argv,labels:{"herdr.space":$space,"herdr.tab":$tab},pid:null,address:$address,pane:$pane}' >"$STATE/term.$terminal"
+  [[ ! -f "$STATE/status-sequence-on-create" ]] || cp "$STATE/status-sequence-on-create" "$STATE/get-seq.$terminal"
+  [[ ! -f "$STATE/screen-on-create" ]] || cp "$STATE/screen-on-create" "$STATE/screen.$terminal"
 }
 rebuild_ls() {
   local tabs='[]' terms='{}' file id term tab
@@ -203,5 +255,5 @@ case "$operation" in
 esac
 SH
 
-  chmod +x "$fake/hc" "$fake/herdr-app"
+  chmod +x "$fake/hc" "$fake/herdr-app" "$fake/sleep"
 }

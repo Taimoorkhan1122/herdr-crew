@@ -89,6 +89,7 @@ export PATH="$FAKE:$PATH" HOME="$TMP/home" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 CRE
 unset CREW_SLUG CREW_REPO CREW_AGENT CREW_TASK CREW_MANAGER CREW_DRY_RUN BRANCH_EXISTS
 source "$ROOT/test/fixtures/fake-runtime.sh"
 install_fake_runtime "$FAKE" "$STATE"
+touch "$STATE/auto-ready"
 
 fails=0
 pass() { echo "PASS: $1"; }
@@ -98,6 +99,7 @@ cnt() { grep -c -- "$1" "$LOG" || true; }
 in_log() { if grep -qF -- "$2" "$LOG"; then pass "$1"; else flunk "$1 (missing: $2)"; fi; }
 in_out() { if grep -qF -- "$2" <<<"$3"; then pass "$1"; else flunk "$1 (missing: $2)"; fi; }
 json_log() { sed -n '/^\["herdr-app"/p' "$LOG" | jq -s "$@"; }
+hc_log() { sed -n '/^\["hc"/p' "$LOG" | jq -s "$@"; }
 app_argv_text() { json_log -r '[.[] | select(.[0] == "herdr-app" and .[1] == "do" and (index("--argv") != null)) | . as $call | ($call | index("--argv")) as $i | ($call[$i + 1] | fromjson | join(" "))] | join("\n")'; }
 app_settings() { json_log -r '[.[] | select(.[0] == "herdr-app" and .[1] == "do" and (index("--argv") != null)) | . as $call | ($call | index("--argv")) as $i | ($call[$i + 1] | fromjson) as $argv | ($argv | index("--settings")) as $s | select($s != null) | $argv[$s + 1]][-1] // empty'; }
 app_agents_json() { json_log -r '[.[] | select(.[0] == "herdr-app" and .[1] == "do" and (index("--argv") != null)) | . as $call | ($call | index("--argv")) as $i | ($call[$i + 1] | fromjson) as $argv | ($argv | index("--agents")) as $a | select($a != null) | $argv[$a + 1]][0] // empty'; }
@@ -190,7 +192,9 @@ in_log "dash text: = form keeps the title" "tsk add --title=-fix parser --notes=
 # 5. say: idle agent gets a prompt from the real sender; busy agent gets a queued step, exit 0
 reset; echo idle >"$STATE/$S-t7-driver"
 CREW_AGENT=$S-t7-navigator "$CREW" say "$S-t7-driver" "hello there" >/dev/null
-in_log "say idle: prompt from the real sender" "agent prompt $S-t7-driver [from $S-t7-navigator] hello there"
+say_term=$(sed -n 's/^terminal=//p' "$HOME/.herdr/crew/$S/$S-t7-driver.meta")
+hc_log -e --arg terminal "$say_term" --arg message "[from $S-t7-navigator] hello there" 'any(.[]; . == ["hc","send",$terminal,$message])' >/dev/null \
+  && pass "say idle: sends through the saved terminal from the real sender" || flunk "say idle: message was not sent"
 echo working >"$STATE/$S-t7-driver"; reset
 out=$(CREW_AGENT=$S-t7-navigator "$CREW" say "$S-t7-driver" "hold on" 2>&1)
 in_out "say busy: queued" "queued on T7" "$out"
@@ -328,7 +332,9 @@ reset; echo idle >"$STATE/$S-manager"
 out=$(echo "Goal: fix login. Done: test written." | CREW_AGENT=$S-t7-driver CREW_TASK=T7 "$CREW" handoff "half done" 2>&1)
 [[ -f "$HOME/.herdr/crew/$S/handoff-$S-t7-driver.md" ]] && pass "handoff: writes the handoff file" || flunk "handoff: no file"
 in_log "handoff: step on the task" "tsk steps T7 add [handoff] $S-t7-driver: half done"
-in_log "handoff: prompts the manager for a worker" "agent prompt $S-manager [from $S-t7-driver] $S-t7-driver hit the context limit"
+manager_term=$(sed -n 's/^terminal=//p' "$HOME/.herdr/crew/$S/$S-manager.meta")
+hc_log -e --arg terminal "$manager_term" --arg message "[from $S-t7-driver] $S-t7-driver hit the context limit. Handoff: $HOME/.herdr/crew/$S/handoff-$S-t7-driver.md. Restart it: herdr-crew restart $S-t7-driver" 'any(.[]; . == ["hc","send",$terminal,$message])' >/dev/null \
+  && pass "handoff: sends manager notification through hc" || flunk "handoff: manager was not notified"
 reject "handoff: refuses with no body and no file" "no handoff at" "" handoff "x"
 
 # restart: /exit, wait for the shell, start again with a readable handoff path
@@ -375,15 +381,19 @@ out=$(BRANCH_EXISTS=1 "$CREW" team pair T7 "reuse worktree" 2>&1)
 [[ $(cnt 'worktree add') == 0 ]] && pass "pair worktree: retained" || flunk "pair worktree: added again"
 rmdir "$HOME/.herdr/worktrees/$S/T7-pair"
 
-# 22. Visible pasted input gets Enter; first app briefs wait for readiness handling in Task 3.
-reset; echo idle >"$STATE/$S-t7-navigator"; touch "$STATE/paste"; rm -f "$STATE/entered"
+# 22. Visible pasted input gets one Enter; each first app brief uses hc send.
+reset; echo idle >"$STATE/$S-t7-navigator"; rm -f "$STATE/entered"
+paste_term=$(sed -n 's/^terminal=//p' "$HOME/.herdr/crew/$S/$S-t7-navigator.meta")
+jq '.status = "idle" | .swallow = true' "$STATE/term.$paste_term" >"$STATE/term.$paste_term.tmp"
+mv "$STATE/term.$paste_term.tmp" "$STATE/term.$paste_term"
 out=$("$CREW" say "$S-t7-navigator" "paste me" 2>&1)
-in_log "paste: extra Enter" "agent send-keys $S-t7-navigator enter"
-[[ $(cnt 'agent prompt') == 1 ]] && pass "paste: submitted once" || flunk "paste: duplicate prompt"
-rm -f "$STATE/paste" "$STATE/entered"
+hc_log -e --arg term "$paste_term" 'any(.[]; . == ["hc","keys",$term,"enter"])' >/dev/null \
+  && pass "paste: extra Enter after visible text" || flunk "paste: missing Enter retry"
+hc_log -e --arg term "$paste_term" '[.[] | select(.[0:3] == ["hc","send",$term])] | length == 1' >/dev/null \
+  && pass "paste: submitted once" || flunk "paste: duplicate prompt"
 reset; touch "$STATE/ambiguous" "$STATE/quick-done"
 out=$("$CREW" team pair T7 "brief awaits readiness" 2>&1)
-[[ $(cnt 'agent prompt') == 0 ]] && pass "first app briefs wait for readiness handling" || flunk "first app brief used legacy Herdr"
+[[ $(hc_log '[.[] | select(.[0:2] == ["hc","send"])] | length') == 2 ]] && pass "first app briefs use hc send" || flunk "first app briefs did not use hc send"
 rm -f "$STATE/ambiguous" "$STATE/quick-done"
 
 # 23. SessionStart restores exports in a fresh Claude shell environment.
@@ -629,6 +639,64 @@ rc=0; out=$("$CREW" completion 2>&1) || rc=$?
     && pass "runtime fake: logs app argv including JSON argv" || flunk "runtime fake: app argv log missing"
   jq -s -e --arg pane "$root_pane" --arg argv "$argv" 'any(.[]; . == ["herdr-app","do","pane.split","--direction","right","--pane",$pane,"--argv",$argv])' "$LOG" >/dev/null \
     && pass "runtime fake: logs split argv exactly" || flunk "runtime fake: split argv log missing"
+
+  # 29. New agent briefs wait for readiness, trust only the recognized dialog, and use hc send safely.
+  READY_STATE="$TMP/readiness-state"; READY_HOME="$TMP/readiness-home"; READY_LOG="$TMP/readiness-log"
+  ready_reset() {
+    rm -rf "$READY_STATE" "$READY_HOME"
+    mkdir -p "$READY_STATE" "$READY_HOME"
+    : >"$READY_LOG"
+    touch "$READY_STATE/auto-ready"
+  }
+  run_ready() {
+    env HOME="$READY_HOME" STATE="$READY_STATE" LOG="$READY_LOG" CREW_REPO="$REPO" CREW_SLUG=readiness CREW_WS=w1 "$CREW" "$@"
+  }
+  ready_meta="$READY_HOME/.herdr/crew/readiness/readiness-t7-investigator.meta"
+
+  ready_reset
+  printf 'null\nidle\n' >"$READY_STATE/status-sequence-on-create"
+  rc=0; out=$(run_ready team investigate T7 "wait for readiness" 2>&1) || rc=$?
+  (( rc == 0 )) && pass "readiness: null then idle allows first brief" || flunk "readiness: null then idle rc=$rc ($out)"
+  jq -s -e '([.[] | select(.[0:3] == ["hc","get","t1"])] | length) == 4 and ([.[] | select(.[0:3] == ["hc","read","t1"] and .[3:] == ["--lines","40"])] | length) == 1' "$READY_LOG" >/dev/null \
+    && pass "readiness: polls null then idle and reads screen" || flunk "readiness: expected status/read sequence"
+  jq -s -e '[.[] | select(.[0:2] == ["hc","send"])] | length == 1 and .[0][2] == "t1"' "$READY_LOG" >/dev/null \
+    && pass "readiness: sends one first brief" || flunk "readiness: first brief send count/terminal"
+  grep -q '^rank=inspector$' "$ready_meta" && grep -q '^job=investigator$' "$ready_meta" \
+    && [[ -s "$READY_HOME/.herdr/crew/readiness/readiness-t7-investigator.brief" && -s "$READY_HOME/.herdr/crew/readiness/readiness-t7-investigator.definition" ]] \
+    && pass "readiness: saves full agent state after readiness" || flunk "readiness: saved state missing"
+
+  ready_reset
+  printf '%s\n' 'Claude asks: trust this folder?' >"$READY_STATE/screen-on-create"
+  rc=0; out=$(run_ready team investigate T7 "trust then send" 2>&1) || rc=$?
+  (( rc == 0 )) && pass "trust: recognized dialog allows launch" || flunk "trust: launch rc=$rc ($out)"
+  jq -s -e '([to_entries[] | select(.value == ["hc","keys","t1","down","enter"]) | .key][0]) < ([to_entries[] | select(.value[0:2] == ["hc","send"]) | .key][0])' "$READY_LOG" >/dev/null \
+    && pass "trust: answers only named folder prompt before send" || flunk "trust: keys did not precede send"
+
+  ready_reset
+  printf '%s\n' blocked >"$READY_STATE/status-on-create"
+  mkdir -p "$(dirname "$ready_meta")"; printf 'old meta\n' >"$ready_meta"
+  rc=0; out=$(run_ready team investigate T7 "must not send" 2>&1) || rc=$?
+  (( rc != 0 )) && [[ $(jq -s '[.[] | select(.[0:2] == ["hc","send"])] | length' "$READY_LOG") == 0 ]] \
+    && grep -q '^old meta$' "$ready_meta" \
+    && pass "readiness: blocked returns failure without send or replacing meta" || flunk "readiness: blocked rc=$rc, output=$out"
+
+  ready_reset
+  printf '9\n' >"$READY_STATE/send-exit-on-create"
+  rc=0; out=$(run_ready team investigate T7 "blocked send" 2>&1) || rc=$?
+  (( rc != 0 )) && in_out "send: exit 9 warns and fails launch" "needs a person" "$out" || flunk "send: exit 9 rc=$rc ($out)"
+  [[ ! -e "$READY_STATE/sent.t1" ]] && pass "send: exit 9 leaves message unsent" || flunk "send: exit 9 recorded a sent message"
+
+  ready_reset
+  printf '3\n' >"$READY_STATE/send-exit-on-create"
+  rc=0; out=$(run_ready team investigate T7 "gone terminal" 2>&1) || rc=$?
+  (( rc != 0 )) && in_out "send: exit 3 fails launch" "terminal t1 is gone" "$out" || flunk "send: exit 3 rc=$rc ($out)"
+
+  ready_reset
+  touch "$READY_STATE/swallow-send-on-create"
+  rc=0; out=$(run_ready team investigate T7 "retry Enter" 2>&1) || rc=$?
+  (( rc == 0 )) && pass "paste: swallowed Enter recovers first brief" || flunk "paste: launch rc=$rc ($out)"
+  jq -s -e '[.[] | select(. == ["hc","keys","t1","enter"])] | length == 1' "$READY_LOG" >/dev/null \
+    && pass "paste: retries Enter once after visible first line" || flunk "paste: Enter retry missing or duplicated"
 
 echo
 if (( fails == 0 )); then echo "ALL PASS"; else echo "$fails FAILED"; exit 1; fi

@@ -55,12 +55,19 @@ exit 0
 SH
 chmod +x "$TMP/fake/"*
 install_fake_runtime "$TMP/fake" "$STATE"
+touch "$STATE/auto-ready"
 export PATH="$TMP/fake:$PATH"
 cd "$CREW_REPO" || exit 1
 fails=0
 check() { if "$@"; then printf 'PASS: %s\n' "$label"; else printf 'FAIL: %s (rc=%s; %s)\n' "$label" "$rc" "$out"; fails=$((fails+1)); fi; }
 run() { : > "$LOG"; rc=0; out=$("$CREW" "$@" 2>&1) || rc=$?; }
 app_log() { sed -n '/^\["herdr-app"/p' "$LOG" | jq -s "$@"; }
+registered_and_sent() {
+  local name=$1 meta="$HOME/.herdr/crew/fixture/$1.meta" terminal
+  [[ -s "$meta" && -s "$HOME/.herdr/crew/fixture/$name.brief" && -s "$HOME/.herdr/crew/fixture/$name.definition" ]] || return 1
+  terminal=$(sed -n 's/^terminal=//p' "$meta")
+  [[ -n "$terminal" ]] && jq -se --arg terminal "$terminal" 'any(.[]; .[0:3] == ["hc","send",$terminal])' "$LOG" >/dev/null
+}
 claude_policy() {
   [[ "$rc" == 0 ]] || return 1
   app_log -e '[.[] | select(.[0] == "herdr-app" and .[1] == "do" and (.[2] == "space.new" or .[2] == "tab.new" or .[2] == "pane.split")) | . as $call | ($call|index("--argv")) as $i | ($call[$i+1]|fromjson) as $argv | ($argv|index("--agents")) as $a | select($a != null) | $argv[$a+1] | fromjson | to_entries[] | .value | select((.prompt | contains("CUSTOM PAYMENT REVIEW ORIGINAL")) and (.tools | index("Write") | not) and (.disallowedTools | index("Write")))] | length > 0' >/dev/null
@@ -68,6 +75,8 @@ claude_policy() {
 label='Claude project inspector uses selected guidance and native read-only policy'
 run team payments T7 'inspect payments'
 check claude_policy
+label='agent registration saves snapshots and sends its first brief'
+check registered_and_sent fixture-t7-payments-reviewer
 printf '%s\n' 'CUSTOM PAYMENT REVIEW CHANGED' > "$CREW_REPO/.herdr-crew/agents/payments-reviewer/AGENTS.md"
 label='Claude restart keeps original inspector definition'
 run restart fixture-t7-payments-reviewer

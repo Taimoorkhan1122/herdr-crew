@@ -256,23 +256,76 @@ target_space() {
   WS=$NEW_SPACE; TARGET_TAB=$NEW_TAB; TARGET_TERM=$NEW_TERM; TARGET_PANE=$NEW_PANE
 }
 
-# submit NAME TEXT: prompt, then press Enter again if the agent never starts working
-# (Claude can swallow the Enter that follows a large bracketed paste)
-submit() {
-  mut herdr agent prompt "$1" "$2" >/dev/null
-  [[ -n "${CREW_DRY_RUN:-}" ]] && return 0
-  local i screen
-  for i in 1 2 3 4; do
-    herdr agent wait "$1" --until working --until blocked --until done --timeout 8000 >/dev/null 2>&1 && return 0
-    screen=$(herdr agent read "$1" --source visible 2>/dev/null || true)
-    # Retry only Enter for visible pasted input. An empty box does not prove the prompt was lost.
-    if rg -qF -e '[Pasted text' -e "$(head -1 <<<"$2" | cut -c1-30)" <<<"$screen"; then
-      herdr agent send-keys "$1" enter >/dev/null
-    else
-      break
+# wait_ready TERM TIMEOUT: wait for a usable status, answering only Claude's known trust prompt.
+wait_ready() {
+  local terminal=$1 timeout=$2 elapsed=0 info status screen trust_answered=0
+  while (( elapsed <= timeout )); do
+    info=$(hc get "$terminal" --json 2>/dev/null || true)
+    status=$(jq -r '.status.state // empty' <<<"$info" 2>/dev/null || true)
+    case "$status" in
+      idle|working|done) return 0 ;;
+      blocked) return 1 ;;
+    esac
+    if [[ -z "$status" ]] || (( elapsed >= timeout - 2 )); then
+      screen=$(hc read "$terminal" --lines 40 2>/dev/null || true)
+      if (( !trust_answered )) && rg -qiF 'trust this folder' <<<"$screen"; then
+        hc keys "$terminal" down enter >/dev/null 2>&1 || true
+        trust_answered=1
+      fi
+    fi
+    (( elapsed < timeout )) || break
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  return 2
+}
+
+# submit_term TERM NAME TEXT: send once, then recover a swallowed Enter only for visible pasted text.
+submit_term() {
+  local terminal=$1 name=$2 text=$3 before_turn info status turn screen first_line rc i
+  if [[ -n "${CREW_DRY_RUN:-}" ]]; then mut hc send "$terminal" "$text" >/dev/null; return 0; fi
+  info=$(hc get "$terminal" --json 2>/dev/null || true)
+  before_turn=$(jq -r '.turn // empty' <<<"$info" 2>/dev/null || true)
+  if hc send "$terminal" "$text" >/dev/null 2>&1; then
+    :
+  else
+    rc=$?
+    case "$rc" in
+      9) crew_warn "$name is blocked; needs a person"; return 1 ;;
+      3) die "$name terminal $terminal is gone; relaunch the team" ;;
+      *) die "cannot send first brief to $name (hc send exit $rc)" ;;
+    esac
+  fi
+  for ((i = 0; i < 8; i++)); do
+    sleep 1
+    info=$(hc get "$terminal" --json 2>/dev/null || true)
+    status=$(jq -r '.status.state // empty' <<<"$info" 2>/dev/null || true)
+    turn=$(jq -r '.turn // empty' <<<"$info" 2>/dev/null || true)
+    if [[ "$status" == working ]] || [[ "$turn" =~ ^[0-9]+$ && "$before_turn" =~ ^[0-9]+$ ]] && (( turn > before_turn )); then
+      return 0
     fi
   done
-  crew_warn "$1 did not start working; check its pane"
+  screen=$(hc read "$terminal" --lines 40 2>/dev/null || true)
+  first_line=$(head -1 <<<"$text")
+  if [[ -n "$first_line" ]] && rg -qF -- "$first_line" <<<"$screen"; then
+    hc keys "$terminal" enter >/dev/null 2>&1 || true
+    info=$(hc get "$terminal" --json 2>/dev/null || true)
+    status=$(jq -r '.status.state // empty' <<<"$info" 2>/dev/null || true)
+    turn=$(jq -r '.turn // empty' <<<"$info" 2>/dev/null || true)
+    if [[ "$status" == working ]] || [[ "$turn" =~ ^[0-9]+$ && "$before_turn" =~ ^[0-9]+$ ]] && (( turn > before_turn )); then
+      return 0
+    fi
+  fi
+  crew_warn "$name did not start after brief submission; check terminal $terminal"
+  return 1
+}
+
+# submit NAME TEXT: keep the say caller interface while sending through its saved terminal.
+submit() {
+  local terminal
+  terminal=$(terminal_of "$1")
+  [[ -n "$terminal" ]] || die "no saved terminal for $1 (start it with herdr-crew first)"
+  submit_term "$terminal" "$1" "$2"
 }
 
 # agent_argv NAME RANK TASK JOB [SELECTION DEFINITION CONTEXT_HOOK COMPLETION_HOOK]
@@ -311,21 +364,34 @@ agent_argv() {
   ARGV+=(--settings "$settings")
 }
 
+# register_agent NAME RANK SPACE TAB TERM PANE LABEL TASK BRIEF JOB SELECTION DEFINITION CONTEXT_HOOK COMPLETION_HOOK
+register_agent() {
+  local name=$1 rank=$2 space=$3 tab=$4 terminal=$5 pane=$6 label=$7 task=$8 brief_text=$9 job=${10:-} selection=${11:-} definition=${12:-} context_hook=${13:-} completion_hook=${14:-} coordinator
+  local ready_rc
+  coordinator="$SLUG-manager"
+  [[ "$name" != "$SLUG-manager" ]] || coordinator="$SLUG-lead"
+  [[ -z "${CREW_DRY_RUN:-}" ]] || return 0
+  if wait_ready "$terminal" 30; then :; else
+    ready_rc=$?
+    if (( ready_rc == 1 )); then crew_warn "$name is blocked; needs a person"
+    else crew_warn "$name did not become ready; check terminal $terminal"; fi
+    return 1
+  fi
+  mkdir -p "$SDIR" || die "cannot create crew state directory"
+  printf 'rank=%s\njob=%s\nspace=%s\ntab=%s\nterminal=%s\npane=%s\nlabel=%s\ntask=%s\nselection=%s\ncoordinator=%s\ncontext_hook=%s\ncompletion_hook=%s\n' \
+    "$rank" "$job" "$space" "$tab" "$terminal" "$pane" "$label" "$task" "$selection" "$coordinator" "$context_hook" "$completion_hook" >"$SDIR/$name.meta"
+  printf '%s\n' "$brief_text" >"$SDIR/$name.brief"
+  printf '%s\n' "$definition" >"$SDIR/$name.definition"
+  submit_term "$terminal" "$name" "$brief_text"
+}
+
 # start_agent NAME RANK SPACE TAB TERM PANE LABEL TASK BRIEF JOB SELECTION DEFINITION CONTEXT_HOOK COMPLETION_HOOK
 start_agent() {
-  local name=$1 rank=$2 space=$3 tab=$4 terminal=$5 pane=$6 label=$7 task=$8 brief_text=$9 job=${10:-} selection=${11:-} definition=${12:-} context_hook=${13:-} completion_hook=${14:-} coordinator kind model effort
+  local name=$1 rank=$2 space=$3 tab=$4 terminal=$5 pane=$6 label=$7 task=$8 brief_text=$9 job=${10:-} selection=${11:-} definition=${12:-} context_hook=${13:-} completion_hook=${14:-} kind model effort
   AGENT_JSON=$selection; selection_fields
   kind=$AGENT_KIND; model=$AGENT_MODEL; effort=$AGENT_EFFORT
   crew_step "starting $name ($kind${model:+, $model}${effort:+, $effort})"
-  coordinator="$SLUG-manager"
-  [[ "$name" != "$SLUG-manager" ]] || coordinator="$SLUG-lead"
-  if [[ -z "${CREW_DRY_RUN:-}" ]]; then
-    mkdir -p "$SDIR" || die "cannot create crew state directory"
-    printf 'rank=%s\njob=%s\nspace=%s\ntab=%s\nterminal=%s\npane=%s\nlabel=%s\ntask=%s\nselection=%s\ncoordinator=%s\ncontext_hook=%s\ncompletion_hook=%s\n' \
-      "$rank" "$job" "$space" "$tab" "$terminal" "$pane" "$label" "$task" "$selection" "$coordinator" "$context_hook" "$completion_hook" >"$SDIR/$name.meta"
-    printf '%s\n' "$brief_text" >"$SDIR/$name.brief"
-    printf '%s\n' "$definition" >"$SDIR/$name.definition"
-  fi
+  register_agent "$name" "$rank" "$space" "$tab" "$terminal" "$pane" "$label" "$task" "$brief_text" "$job" "$selection" "$definition" "$context_hook" "$completion_hook"
 }
 
 # snapshot_hook SOURCE PREFIX: copy a project hook to a unique session path without replacing prior bytes.
