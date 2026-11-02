@@ -1,6 +1,18 @@
 # Lead state and session checkpoint
 
-## Active checkpoint: validation spikes passed; research updated, PR #7 open
+## Active checkpoint: migration execution stopped in Task 3; partial work preserved
+
+Updated: 2026-11-02 17:54 PKT (Asia/Karachi). Implementation worktree `/Users/gok/.local/share/opencode/worktree/e95e5b/herdr-core-runtime`, branch `feat/herdr-core-app-runtime`, HEAD 2cec0e1. The research branch `docs/herdr-core-app-migration-research` is pushed at 42a8f5f and PR #7 is open at https://github.com/Taimoorkhan1122/herdr-crew/pull/7. The user approved ADR 0025 and the plan, approved the push, chose subagent-driven execution, and then asked to stop all work. No merge, implementation push, installation or live launch is authorized.
+
+Completed: ADR 0025 and the six-task plan are pushed in PR #7. Task 1 added `test/fixtures/fake-runtime.sh` as commit b684233; its review was clean. Task 2 routed launch and team topology through `herdr-app` as commit 2cec0e1; its review found three items, ruled as later-task scope: the lead-rerun path reaches legacy `cmd_say` (Task 4), metadata is written before readiness (Task 3), and the worktree/agent-config fixtures lack `herdr-app` (Task 6). The full ledger is `.superpowers/sdd/2026-11-02-herdr-core-app-migration/progress.md`.
+
+Work in hand: Task 3 (readiness, trust dialog, first brief) was stopped before commit. Uncommitted changes remain in `bin/crew`, `test/dry-run.sh`, `test/fixtures/fake-runtime.sh` and `test/project-launch.sh` (about 199 insertions). The diff is saved at `.superpowers/sdd/2026-11-02-herdr-core-app-migration/task-3-partial.patch`. A stop request went to that subagent; no Task 3 commit exists. Preserve all four modified files and the patch. No final test result exists for this partial tree.
+
+Limits: `test/worktrees.sh` and `test/agent-config.sh` fail until Task 6 installs the new runtime fixture. No live crew has run. No launcher behavior is verified live.
+
+Next: 1) Read the ledger and `task-3-partial.patch`, then inspect the four modified files. 2) Resume Task 3: implement `wait_ready`, `submit_term` and `register_agent`; move the meta write behind readiness; then run dry-run and project-launch RED/GREEN and commit. 3) Continue Tasks 4-6 and the final whole-branch review. 4) Push, merge or live launch only with explicit approval.
+
+## Historical checkpoint: validation spikes passed; research updated, PR #7 open
 
 Updated: 2026-11-02 15:16 PKT. Repository `/Users/gok/git/herdr-crew` is on branch `docs/herdr-core-app-migration-research` three commits above `main`. The validation update and this planning update are committed locally and not pushed. PR #7 is open at https://github.com/Taimoorkhan1122/herdr-crew/pull/7; its visible head is a4a2f17 with GitGuardian passing and review required. No merge is authorized. This session is an hc terminal (`HC_TERMINAL_ID=t2v`), not a crew, so no runtime `herdr-crew handoff` was written.
 
