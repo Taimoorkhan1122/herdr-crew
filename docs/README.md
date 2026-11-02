@@ -11,6 +11,8 @@ These files record how herdr-crew got built, why it is built the way it is, and 
 - `research/2026-10-29-package-simplification.md`: completed simplification interview and decision record.
 - `superpowers/specs/2026-10-29-project-agent-baseline-design.md`: approved project-owned agent design with selected open standards; not implemented.
 - `research/2026-10-29-agent-specifications.md`: primary-source AGENTS.md/Agent Skills research, native runtime distinctions, evaluation and script guidance.
+- `../reports/Herdr core and app migration.md`: migration research for `herdr-core` and `herdr-app`, with the Option A recommendation.
+- `../research_notes/Herdr core and app migration/validation-spikes-2026-11-02.md`: observed core and app behavior behind that report.
 - `superpowers/plans/2026-10-29-project-agent-baseline.md`: regression-first implementation plan and execution handoff; implementation and evaluations have not run.
 - `PROGRESS.md`: a dated log of each change session, newest first.
 - `maintainability-review-2026-10-14.md`: independent KISS review findings and proposed focused fixes; not implemented.

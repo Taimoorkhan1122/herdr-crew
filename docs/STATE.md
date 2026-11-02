@@ -2,6 +2,19 @@
 
 Status as of 2026-10-14. Crew launch and project Q&A have live scratch-repo evidence; full development acceptance remains pending. Two live problems are open: the Haiku driver claimed it had no shell, and the Manager used an archived task number. Live test 3 (review and test teams) has not run. Verification is tracked per feature below; launch tests do not establish full lifecycle acceptance.
 
+## herdr-core and herdr-app migration research (2026-11-02)
+
+- Research recommends Option A: the app owns the space, tab and pane frame; `hc` owns send, wait, read, status, events and cleanup. Full replacement is feasible, but it is a control-plane rewrite that changes the launcher, fixtures, prompts, permissions and docs together. The legacy `herdr` TUI remains maintained, so migration is a product choice.
+- Five validation spikes passed on 2026-11-02 with `hc` 0.1.16 and `herdr-app` 0.1.11. The app-created terminal was addressable by `hc get` in 0.27 s with `herdr.space` and `herdr.tab` labels. An `env CREW_*` prefix delivered every value and `HC_TERMINAL_ID`. A real agent moved null → working → done/turn 1, but an untrusted-folder dialog kept status null for 30 s. Blocked send exited 9; a missing terminal exited 3. The app wrapper returned a shell in the same pane after a normal agent exit; `hc kill` closed the pane and `keep` did not recover it.
+- Consequences: per-pane environment needs no new API, and the app already supplies the keep-alive shell. Remaining costs are no first-message delivery receipt from `tab.new`, restart after a kill means a new pane, no split-ratio control, indirect pane titles, and no headless use. Evidence: [validation note](../research_notes/Herdr%20core%20and%20app%20migration/validation-spikes-2026-11-02.md); report: [migration report](../reports/Herdr%20core%20and%20app%20migration.md).
+- No source, test, prompt, dependency or installation change. PR #7 holds the research and awaits review; no merge, implementation or plan approval is recorded.
+
+## Project-agent baseline (local implementation, 2026-10-30)
+
+The approved baseline is implemented but remains uncommitted in a separate worktree; main's runtime is unchanged. Project setup and explicit hash-checked upgrades, named agent definitions, native adapter snapshots and per-session project hooks have fixture coverage. Independent review found a partial setup defect, fixed with a failing then passing regression; no further material findings were reported. The final launcher suite passed after a stale hook-path assertion was corrected. See LEAD_STATE for exact current evidence.
+
+Completion notifications can repeat if a process dies after delivery and before its marker, and a stale lock may require intervention. Directory replacement retains a recovery copy but does not eliminate races with noncooperating editors. Native permission enforcement, live crew behavior and model-driven skill comparisons remain unverified. No installation, publication or live launch was authorized or performed.
+
 ## Command-line UX (2026-10-27)
 
 - `bin/crew` now has a complete command-line interface: `help [<command>]`, `<command> --help` for every command, `--version`/`-V`, a global `--dry-run`, and `completion <bash|zsh>`. The layer lives in `lib/ux.sh` and is sourced before the tsk, herdr and jq checks, so help and version need none of them.
