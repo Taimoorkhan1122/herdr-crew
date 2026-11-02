@@ -3,10 +3,11 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
 CREW="$ROOT/bin/crew"
+source "$ROOT/test/fixtures/fake-runtime.sh"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/crew-launch.XXXXXX") || exit 1
 trap 'rm -rf "$TMP"' EXIT
-mkdir -p "$TMP/home" "$TMP/project with spaces/.herdr-crew" "$TMP/fake" "$TMP/panes"
-export HOME="$TMP/home" LOG="$TMP/calls.jsonl" PANE_ENV_DIR="$TMP/panes"
+mkdir -p "$TMP/home" "$TMP/project with spaces/.herdr-crew" "$TMP/fake" "$TMP/panes" "$TMP/state"
+export HOME="$TMP/home" LOG="$TMP/calls.jsonl" PANE_ENV_DIR="$TMP/panes" STATE="$TMP/state"
 export CREW_REPO="$TMP/project with spaces" CREW_SLUG=fixture HERDR_ENV=1 CREW_WS=w1
 unset CREW_DRY_RUN CREW_AGENT CREW_TASK CREW_MANAGER
 : > "$LOG"
@@ -53,6 +54,7 @@ cat > "$TMP/fake/opencode" <<'SH'
 exit 0
 SH
 chmod +x "$TMP/fake/"*
+install_fake_runtime "$TMP/fake" "$STATE"
 export PATH="$TMP/fake:$PATH"
 cd "$CREW_REPO" || exit 1
 fails=0

@@ -4,6 +4,7 @@
 set -euo pipefail
 
 CREW="$(cd "$(dirname "$0")/.." && pwd)/bin/crew"
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 FAKE="$TMP/fake"; STATE="$TMP/state"; export LOG="$TMP/log" STATE TMP
@@ -86,6 +87,8 @@ printf '#!/usr/bin/env bash\nexit 0\n' >"$FAKE/claude"
 chmod +x "$FAKE"/*
 export PATH="$FAKE:$PATH" HOME="$TMP/home" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 CREW_WS=w1
 unset CREW_SLUG CREW_REPO CREW_AGENT CREW_TASK CREW_MANAGER CREW_DRY_RUN BRANCH_EXISTS
+source "$ROOT/test/fixtures/fake-runtime.sh"
+install_fake_runtime "$FAKE" "$STATE"
 
 fails=0
 pass() { echo "PASS: $1"; }
@@ -541,6 +544,63 @@ rc=0; out=$("$CREW" completion fish 2>&1) || rc=$?
 (( rc != 0 )) && pass "completion: unknown shell refused" || flunk "completion: accepted fish"
 rc=0; out=$("$CREW" completion 2>&1) || rc=$?
 (( rc != 0 )) && in_out "completion: missing shell refused" "completion <bash|zsh>" "$out" || flunk "completion: missing shell rc=$rc"
+
+# 28. Core/app fake runtime contract. Keep these binaries outside PATH; call them directly.
+  RFAKE="$TMP/runtime-fake"; RSTATE="$TMP/runtime-state"
+  mkdir -p "$RFAKE" "$RSTATE"
+  reset
+  install_fake_runtime "$RFAKE" "$RSTATE"
+  argv='["env","CREW_AGENT=lead","claude"]'
+  out=$("$RFAKE/herdr-app" do space.new --name crew-fixture --folder "$TMP" --tab lead --argv "$argv")
+  in_out "runtime fake: space.new returns IDs" '"space":"sp1"' "$out"
+  in_out "runtime fake: space.new returns tab and terminal IDs" '"tab":"tb1"' "$out"
+  in_out "runtime fake: space.new returns terminal ID" '"terminal":"t1"' "$out"
+  space=$(jq -r '.space' <<<"$out"); root_tab=$(jq -r '.tab' <<<"$out"); root_term=$(jq -r '.terminal' <<<"$out")
+  out=$("$RFAKE/herdr-app" do tab.new --space "$space" --name worker --folder "$TMP" --argv "$argv")
+  in_out "runtime fake: tab.new returns IDs without pane" '"tab":"tb2"' "$out"
+  worker_tab=$(jq -r '.tab' <<<"$out")
+  root_pane=$("$RFAKE/herdr-app" ls | jq -r --arg tab "$root_tab" '.spaces[0].tabs[] | select(.id == $tab) | .terminals[0].pane')
+  jq -e --arg space "$space" --arg tab "$root_tab" --arg term "$root_term" '.spaces[0].id == $space and .spaces[0].tabs[0].id == $tab and .spaces[0].tabs[0].terminals[0].terminal == $term' <<<"$("$RFAKE/herdr-app" ls)" >/dev/null \
+    && pass "runtime fake: app ls lists space, tab and terminal" || flunk "runtime fake: app ls listing"
+  out=$("$RFAKE/herdr-app" do pane.split --direction right --pane "$root_pane" --argv "$argv")
+  in_out "runtime fake: pane.split returns IDs" '"pane":"p3"' "$out"
+  split_term=$(jq -r '.terminal' <<<"$out")
+  out=$("$RFAKE/hc" get "$split_term" --json)
+  in_out "runtime fake: hc get returns terminal object" '"address":"t3"' "$out"
+  in_out "runtime fake: hc get keeps null status" '"status":null' "$out"
+  jq -e --arg term "$root_term" --argjson argv "$argv" '.address == $term and .argv == $argv and (.labels | type == "object") and has("pid")' <<<"$("$RFAKE/hc" get "$root_term" --json)" >/dev/null \
+    && pass "runtime fake: hc get exposes argv, labels and pid" || flunk "runtime fake: hc get terminal fields"
+  jq -e --arg term "$split_term" '.terminals | any(.address == $term and .status == null)' <<<"$("$RFAKE/hc" ls --json)" >/dev/null \
+    && pass "runtime fake: hc ls lists terminal status" || flunk "runtime fake: hc ls listing"
+  printf 'fixture screen\n' >"$RSTATE/screen.$split_term"
+  out=$("$RFAKE/hc" read "$split_term" --lines 2)
+  in_out "runtime fake: hc read returns screen text" "fixture screen" "$out"
+  "$RFAKE/hc" keys "$split_term" down enter
+  "$RFAKE/hc" wait "$split_term" >/dev/null
+  "$RFAKE/hc" label "$split_term" crew.task=T7
+  jq -e '.labels["crew.task"] == "T7"' <<<"$("$RFAKE/hc" get "$split_term" --json)" >/dev/null \
+    && pass "runtime fake: keys, wait and label are controllable" || flunk "runtime fake: keys, wait or label"
+  jq --argjson status '"blocked"' '.status = $status' "$RSTATE/term.$split_term" >"$RSTATE/term.$split_term.tmp"
+  mv "$RSTATE/term.$split_term.tmp" "$RSTATE/term.$split_term"
+  rc=0; out=$("$RFAKE/hc" send "$split_term" "blocked message" 2>&1) || rc=$?
+  (( rc == 9 )) && in_out "runtime fake: blocked send exits 9" '"kind":"blocked"' "$out" || flunk "runtime fake: blocked send rc=$rc ($out)"
+  rc=0; out=$("$RFAKE/hc" send missing "missing message" 2>&1) || rc=$?
+  (( rc == 3 )) && pass "runtime fake: missing send exits 3" || flunk "runtime fake: missing send rc=$rc ($out)"
+  "$RFAKE/hc" kill "$split_term"
+  jq -e '.state == "finished"' <<<"$("$RFAKE/hc" get "$split_term" --json)" >/dev/null \
+    && pass "runtime fake: kill marks terminal finished" || flunk "runtime fake: kill state"
+  out=$("$RFAKE/herdr-app" do tab.rename --id "$worker_tab" --name worker-renamed)
+  in_out "runtime fake: tab.rename succeeds" '"ok":true' "$out"
+  jq -e --arg tab "$worker_tab" 'any(.spaces[0].tabs[]; .id == $tab and .name == "worker-renamed")' "$RSTATE/ls.json" >/dev/null \
+    && pass "runtime fake: renamed tab updates listing" || flunk "runtime fake: tab rename listing"
+  out=$("$RFAKE/herdr-app" do tab.close --id "$worker_tab" --confirmed true)
+  in_out "runtime fake: tab.close succeeds" '"ok":true' "$out"
+  jq -e --arg tab "$worker_tab" 'all(.spaces[0].tabs[]; .id != $tab)' "$RSTATE/ls.json" >/dev/null \
+    && pass "runtime fake: closed tab leaves listing" || flunk "runtime fake: closed tab remains listed"
+  jq -s -e --arg folder "$TMP" --arg argv "$argv" 'any(.[]; . == ["herdr-app","do","space.new","--name","crew-fixture","--folder",$folder,"--tab","lead","--argv",$argv])' "$LOG" >/dev/null \
+    && pass "runtime fake: logs app argv including JSON argv" || flunk "runtime fake: app argv log missing"
+  jq -s -e --arg pane "$root_pane" --arg argv "$argv" 'any(.[]; . == ["herdr-app","do","pane.split","--direction","right","--pane",$pane,"--argv",$argv])' "$LOG" >/dev/null \
+    && pass "runtime fake: logs split argv exactly" || flunk "runtime fake: split argv log missing"
 
 echo
 if (( fails == 0 )); then echo "ALL PASS"; else echo "$fails FAILED"; exit 1; fi
