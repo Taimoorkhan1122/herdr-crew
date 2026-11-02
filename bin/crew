@@ -89,13 +89,19 @@ parse_spec() {
   fi
 }
 agent_name() { echo "$SLUG-$(echo "$1" | tr '[:upper:]' '[:lower:]')-$2" | cut -c1-32; }
-# set_env NAME TASK: fills EV with the CREW_* --env args for the agent that will own the next pane.
-# herdr pane split does not inherit tab env, so every pane gets its own.
-set_env() { EV=(--env "CREW_SLUG=$SLUG" --env "CREW_TASK=$2" --env "CREW_AGENT=$1" --env "CREW_MANAGER=$SLUG-manager" --env "CREW_CTX_LIMIT=${CREW_CTX_LIMIT:-135000}" --env "CREW_REPO=$REPO" --env "CREW_WS=${WS:-${CREW_WS:-${HERDR_WORKSPACE_ID:-}}}")
-  if [[ -n "${3:-}" ]]; then
-    agent_selection "$3" "${4:-}"
+# set_env NAME TASK JOB [SELECTION]: fills ENVV with K=V assignments for an app argv.
+set_env() {
+  local rank job="" selection=${4:-}
+  rank=$3
+  if [[ -n "$rank" && " $RANKS " != *" $rank "* ]]; then
+    job=$rank
+    rank=$(persona_rank "$job")
+  fi
+  ENVV=("CREW_SLUG=$SLUG" "CREW_TASK=$2" "CREW_AGENT=$1" "CREW_MANAGER=$SLUG-manager" "CREW_CTX_LIMIT=${CREW_CTX_LIMIT:-135000}" "CREW_REPO=$REPO" "CREW_WS=${WS-${CREW_WS:-${HERDR_WORKSPACE_ID:-}}}")
+  if [[ -n "$rank" ]]; then
+    if [[ -n "$selection" ]]; then AGENT_JSON=$selection; selection_fields; else agent_selection "$rank" "$job"; fi
     if [[ "$AGENT_KIND" == opencode ]]; then
-      EV+=(--env "OPENCODE_CONFIG_CONTENT=$(opencode_config "$3" "${4:-}")")
+      ENVV+=("OPENCODE_CONFIG_CONTENT=$(opencode_config "$rank" "$job")")
     fi
   fi
 }
@@ -107,26 +113,14 @@ pmap_for() { local e; for e in $pmap; do if [[ "${e%%=*}" == "$1" ]]; then echo 
 branch_exists() { git -C "$REPO" rev-parse --verify -q "refs/heads/$1" >/dev/null 2>&1; }
 # status_of NAME: agent_status from herdr agent get (idle, working, blocked, done, unknown); empty if no such agent
 status_of() { herdr agent get "$1" 2>/dev/null | jq -r '.result.agent.agent_status // empty' 2>/dev/null || true; }
-
-# Reclaim a registry name only after the former occupant's pane reaches its shell.
-clear_stale_name() {
-  local info pane pi
-  info=$(herdr agent get "$1" 2>/dev/null) || return 0
-  pane=$(jq -r '.result.agent.pane_id // empty' <<<"$info")
-  [[ -n "$pane" ]] || return 0
-  pi=$(herdr pane process-info --pane "$pane" 2>/dev/null) || return 0
-  if jq -e '.result.process_info | .shell_pid != null and .foreground_process_group_id == .shell_pid' <<<"$pi" >/dev/null 2>&1; then
-    mut herdr agent rename "$1" --clear >/dev/null
-  fi
-}
+terminal_of() { sed -n 's/^terminal=//p' "$SDIR/$1.meta" 2>/dev/null | head -1; }
 
 # A saved Claude SessionStart hook repopulates Bash tool env after resume.
 crew_env_hook() {
   local exports assignment
-  set_env "$1" "$2"
+  set_env "$1" "$2" "${3:-}" "${4:-}"
   exports=""
-  for assignment in "${EV[@]}"; do
-    [[ "$assignment" == --env ]] && continue
+  for assignment in "${ENVV[@]}"; do
     printf -v assignment '%q' "$assignment"
     exports+="export $assignment"$'\n'
   done
@@ -198,20 +192,68 @@ $instr
 BRIEF
 }
 
-# target_ws: sets WS. Inside Herdr: the current workspace. Outside: the crew-<slug> workspace on the running server (reused or created)
-target_ws() {
-  if [[ "${HERDR_ENV:-}" == 1 ]]; then
-    WS="${HERDR_WORKSPACE_ID:?HERDR_WORKSPACE_ID unset}"
-  elif herdr status server >/dev/null 2>&1; then
-    WS=$(herdr workspace list | jq -r --arg l "crew-$SLUG" '[.result.workspaces[] | select(.label == $l) | .workspace_id][0] // empty')
-    if [[ -z "$WS" ]]; then
-      WS=$(mutj '{"result":{"workspace":{"workspace_id":"w_dry"}}}' \
-        herdr workspace create --label "crew-$SLUG" --cwd "$REPO" --no-focus | jq -r '.result.workspace.workspace_id')
-      crew_out "created workspace crew-$SLUG (attach with: herdr)"
-    fi
-  else
-    die "not inside Herdr and no server running. Start Herdr with: herdr   then rerun there"
+# App-owned space/tab/pane creation; hc remains the terminal control plane.
+resolve_space() {
+  local spaces candidate info
+  spaces=$(herdr-app ls) || die "cannot list herdr-app spaces"
+  WS=""
+  if [[ -n "${CREW_WS:-}" ]] && jq -e --arg id "$CREW_WS" 'any(.spaces[]; .id == $id)' <<<"$spaces" >/dev/null; then
+    WS=$CREW_WS
+  elif [[ -n "${HC_TERMINAL_ID:-}" ]] && info=$(hc get "$HC_TERMINAL_ID" --json 2>/dev/null); then
+    candidate=$(jq -r '.labels["herdr.space"] // empty' <<<"$info")
+    if [[ -n "$candidate" ]] && jq -e --arg id "$candidate" 'any(.spaces[]; .id == $id)' <<<"$spaces" >/dev/null; then WS=$candidate; fi
   fi
+  if [[ -z "$WS" ]]; then
+    WS=$(jq -r --arg name "crew-$SLUG" '[.spaces[] | select(.name == $name) | .id][0] // empty' <<<"$spaces")
+  fi
+}
+
+pane_for_terminal() {
+  herdr-app ls | jq -er --arg terminal "$1" '.spaces[].tabs[].terminals[] | select(.terminal == $terminal) | .pane'
+}
+
+app_argv_json() { jq -nc --args '$ARGS.positional' -- "${ARGV[@]}"; }
+
+create_space() {
+  local result
+  result=$(mutj '{"space":"sp-dry","tab":"tb-dry","terminal":"t-dry","pane":"p-dry"}' \
+    herdr-app do space.new --name "$1" --folder "${4:-$REPO}" --tab "$2" --argv "$3") || die "cannot create app space $1"
+  NEW_SPACE=$(jq -r '.space // empty' <<<"$result")
+  NEW_TAB=$(jq -r '.tab // empty' <<<"$result")
+  NEW_TERM=$(jq -r '.terminal // empty' <<<"$result")
+  [[ -n "$NEW_SPACE" && -n "$NEW_TAB" && -n "$NEW_TERM" ]] || die "herdr-app space.new returned incomplete IDs: $result"
+  if [[ -n "${CREW_DRY_RUN:-}" ]]; then NEW_PANE=$(jq -r '.pane // "dry-pane"' <<<"$result")
+  else NEW_PANE=$(pane_for_terminal "$NEW_TERM") || die "cannot find pane for terminal $NEW_TERM"; fi
+}
+
+create_tab() {
+  local result
+  result=$(mutj '{"tab":"tb-dry","terminal":"t-dry","pane":"p-dry"}' \
+    herdr-app do tab.new --space "$1" --name "$2" --folder "$3" --argv "$4") || die "cannot create app tab $2"
+  NEW_TAB=$(jq -r '.tab // empty' <<<"$result")
+  NEW_TERM=$(jq -r '.terminal // empty' <<<"$result")
+  [[ -n "$NEW_TAB" && -n "$NEW_TERM" ]] || die "herdr-app tab.new returned incomplete IDs: $result"
+  if [[ -n "${CREW_DRY_RUN:-}" ]]; then NEW_PANE=$(jq -r '.pane // "dry-pane"' <<<"$result")
+  else NEW_PANE=$(pane_for_terminal "$NEW_TERM") || die "cannot find pane for terminal $NEW_TERM"; fi
+}
+
+split_pane() {
+  local result
+  result=$(mutj '{"pane":"p-dry-split","terminal":"t-dry-split"}' \
+    herdr-app do pane.split --direction "$2" --pane "$1" --argv "$3") || die "cannot split app pane $1"
+  NEW_PANE=$(jq -r '.pane // empty' <<<"$result")
+  NEW_TERM=$(jq -r '.terminal // empty' <<<"$result")
+  [[ -n "$NEW_PANE" && -n "$NEW_TERM" ]] || die "herdr-app pane.split returned incomplete IDs: $result"
+}
+
+# target_space NAME FIRST_TAB CWD ARGV: reuse a live space or create it with its first real terminal.
+target_space() {
+  local name=$1 tab_name=$2 cwd=$3 argv=$4
+  resolve_space
+  TARGET_TAB=""; TARGET_TERM=""; TARGET_PANE=""
+  if [[ -n "$WS" ]]; then return 0; fi
+  create_space "$name" "$tab_name" "$argv" "$cwd"
+  WS=$NEW_SPACE; TARGET_TAB=$NEW_TAB; TARGET_TERM=$NEW_TERM; TARGET_PANE=$NEW_PANE
 }
 
 # submit NAME TEXT: prompt, then press Enter again if the agent never starts working
@@ -233,57 +275,57 @@ submit() {
   crew_warn "$1 did not start working; check its pane"
 }
 
-# start_agent NAME RANK PANE TASK BRIEF [JOB]: start agent in pane, then send brief
-# model: rank `model:`; effort: job persona `effort:` > rank `effort:`
-start_agent() {
-  local name=$1 rank=$2 pane=$3 job=${6:-} kind args=() out text model effort settings env_hook definition native context_hook="" context_command completion_hook coordinator
-  if [[ -n "${7:-}" ]]; then AGENT_JSON=$7; selection_fields; else agent_selection "$rank" "$job"; fi
-  kind=$AGENT_KIND; model=$AGENT_MODEL; effort=$AGENT_EFFORT
-  if [[ -n "${8:-}" ]]; then definition=$8; else definition=$(agent_definition "${job:-crew-$rank}") || die "cannot resolve agent definition"; fi
+# agent_argv NAME RANK TASK JOB [SELECTION DEFINITION CONTEXT_HOOK COMPLETION_HOOK]
+# Builds the native program argv and snapshots the same policy/hooks as the former Herdr start.
+agent_argv() {
+  local name=$1 rank=$2 task=$3 job=${4:-} selection=${5:-} definition native model effort env_hook context_hook="" context_command completion_hook settings ident
+  if [[ -n "$selection" ]]; then AGENT_JSON=$selection; selection_fields; else agent_selection "$rank" "$job"; fi
+  AGENT_SELECTION=$AGENT_JSON; model=$AGENT_MODEL; effort=$AGENT_EFFORT
+  if [[ -n "${6:-}" ]]; then definition=$6; else definition=$(agent_definition "${job:-crew-$rank}") || die "cannot resolve agent definition"; fi
+  AGENT_DEFINITION=$definition
   mkdir -p "$SDIR" || die "cannot create crew state directory"
-  if [[ -n "${10:-}" ]]; then
-    completion_hook=${10}
+  if [[ -n "${8:-}" ]]; then
+    completion_hook=$8
     [[ "$completion_hook" == "$SDIR/$name.task-complete."* && -f "$completion_hook" && ! -L "$completion_hook" ]] || die "invalid saved completion hook; relaunch the team"
   else completion_hook=$(snapshot_hook "$(project_base)/hooks/task-complete.sh" "$name.task-complete") || die "cannot snapshot project completion hook"; fi
+  AGENT_COMPLETION_HOOK=$completion_hook
+  ident=${job:-$rank}
+  set_env "$name" "$task" "$ident" "$AGENT_SELECTION"
+  if [[ "$AGENT_KIND" == opencode ]]; then
+    ARGV=(env "${ENVV[@]}" opencode --standalone)
+    AGENT_CONTEXT_HOOK=""
+    return 0
+  fi
+  native=$(jq -c --arg name "crew-$rank" '{($name): ({description:.description, prompt:(.profileInstructions + (if .id == ("crew-" + .profile) then "" else "\n\n" + .instructions end)), tools:(.tools // []), disallowedTools:(.disallowedTools // [])} + (if .permissionMode then {permissionMode:.permissionMode} else {} end))}' <<<"$definition")
+  if [[ -n "${7:-}" ]]; then
+    context_hook=$7
+    [[ "$context_hook" == "$SDIR/$name.context-limit."* && -f "$context_hook" && ! -L "$context_hook" ]] || die "invalid saved context hook; relaunch the team"
+  else context_hook=$(snapshot_hook "$(project_base)/hooks/context-limit.sh" "$name.context-limit") || die "cannot snapshot project context hook"; fi
+  AGENT_CONTEXT_HOOK=$context_hook
+  env_hook=$(crew_env_hook "$name" "$task" "$ident" "$AGENT_SELECTION")
+  printf -v context_command '%q' "$context_hook"
+  settings=$(jq -nc --arg env_hook "$env_hook" --arg c "$context_command" --arg r "$rank" '{hooks:{SessionStart:[{hooks:[{type:"command",command:$env_hook}]}],PostToolUse:[{hooks:[{type:"command",command:$c}]}],UserPromptSubmit:[{hooks:[{type:"command",command:$c}]}]}} + (if $r == "member" then {permissions:{deny:["Bash(git push:*)","Bash(git merge:*)"]}} else {} end)')
+  ARGV=(env "${ENVV[@]}" claude --agent "crew-$rank" -n "$name" --agents "$native")
+  [[ -n "$model" && "$model" != inherit ]] && ARGV+=(--model "$model")
+  [[ -n "$effort" ]] && ARGV+=(--effort "$effort")
+  ARGV+=(--settings "$settings")
+}
+
+# start_agent NAME RANK SPACE TAB TERM PANE LABEL TASK BRIEF JOB SELECTION DEFINITION CONTEXT_HOOK COMPLETION_HOOK
+start_agent() {
+  local name=$1 rank=$2 space=$3 tab=$4 terminal=$5 pane=$6 label=$7 task=$8 brief_text=$9 job=${10:-} selection=${11:-} definition=${12:-} context_hook=${13:-} completion_hook=${14:-} coordinator kind model effort
+  AGENT_JSON=$selection; selection_fields
+  kind=$AGENT_KIND; model=$AGENT_MODEL; effort=$AGENT_EFFORT
   crew_step "starting $name ($kind${model:+, $model}${effort:+, $effort})"
-  if [[ "$kind" == opencode ]]; then
-    args=(--kind opencode -- --standalone)
-  else
-    native=$(jq -c --arg name "crew-$rank" '{($name): ({description:.description, prompt:(.profileInstructions + (if .id == ("crew-" + .profile) then "" else "\n\n" + .instructions end)), tools:(.tools // []), disallowedTools:(.disallowedTools // [])} + (if .permissionMode then {permissionMode:.permissionMode} else {} end))}' <<<"$definition")
-    args=(--kind claude -- --agent "crew-$rank" -n "$name" --agents "$native")
-    [[ -n "$model" && "$model" != inherit ]] && args+=(--model "$model")
-    [[ -n "$effort" ]] && args+=(--effort "$effort")
-    # ctx-guard warns the agent at the context budget (PostToolUse and UserPromptSubmit)
-    env_hook=$(crew_env_hook "$name" "$4")
-    if [[ -n "${9:-}" ]]; then
-      context_hook=$9
-      [[ "$context_hook" == "$SDIR/$name.context-limit."* && -f "$context_hook" && ! -L "$context_hook" ]] || die "invalid saved context hook; relaunch the team"
-    else context_hook=$(snapshot_hook "$(project_base)/hooks/context-limit.sh" "$name.context-limit") || die "cannot snapshot project context hook"; fi
-    printf -v context_command '%q' "$context_hook"
-    settings=$(jq -nc --arg env_hook "$env_hook" --arg c "$context_command" --arg r "$rank" '{hooks:{SessionStart:[{hooks:[{type:"command",command:$env_hook}]}],PostToolUse:[{hooks:[{type:"command",command:$c}]}],UserPromptSubmit:[{hooks:[{type:"command",command:$c}]}]}} + (if $r == "member" then {permissions:{deny:["Bash(git push:*)","Bash(git merge:*)"]}} else {} end)')
-    # members: push and merge are denied here, not in agent disallowedTools (a Bash pattern there removed all of Bash)
-    args+=(--settings "$settings")
-  fi
-  clear_stale_name "$name"
-  if [[ -n "${CREW_DRY_RUN:-}" ]]; then
-    mut herdr agent start "$name" --pane "$pane" --timeout 120000 "${args[@]}"
-  elif ! out=$(herdr agent start "$name" --pane "$pane" --timeout 120000 "${args[@]}" 2>&1); then
-    [[ "$kind" == claude && "$out" == *agent_not_ready* ]] || die "agent $name failed: $out"
-    text=$(herdr pane read "$pane" --source recent-unwrapped --lines 40 2>/dev/null || true)
-    rg -qi 'trust this folder' <<<"$text" || die "agent $name not ready. Pane output:"$'\n'"$text"
-    # Auto-trust, only for panes this script started. Enter alone picks "No, exit", so select "Yes" first.
-    herdr agent send-keys "$name" down >/dev/null
-    herdr agent send-keys "$name" enter >/dev/null
-    herdr agent wait "$name" --until idle --until done --timeout 120000 >/dev/null  # dialog may still show "blocked" for a moment
-  fi
-  # Save only after startup succeeds; a rejected duplicate name must keep its old state.
-  mkdir -p "$SDIR"
   coordinator="$SLUG-manager"
   [[ "$name" != "$SLUG-manager" ]] || coordinator="$SLUG-lead"
-  printf 'rank=%s\njob=%s\npane=%s\ntask=%s\nselection=%s\ncoordinator=%s\ncontext_hook=%s\ncompletion_hook=%s\n' "$rank" "$job" "$pane" "$4" "$AGENT_JSON" "$coordinator" "$context_hook" "$completion_hook" >"$SDIR/$name.meta"
-  printf '%s\n' "$5" >"$SDIR/$name.brief"
-  printf '%s\n' "$definition" >"$SDIR/$name.definition"
-  submit "$name" "$5"
+  if [[ -z "${CREW_DRY_RUN:-}" ]]; then
+    mkdir -p "$SDIR" || die "cannot create crew state directory"
+    printf 'rank=%s\njob=%s\nspace=%s\ntab=%s\nterminal=%s\npane=%s\nlabel=%s\ntask=%s\nselection=%s\ncoordinator=%s\ncontext_hook=%s\ncompletion_hook=%s\n' \
+      "$rank" "$job" "$space" "$tab" "$terminal" "$pane" "$label" "$task" "$selection" "$coordinator" "$context_hook" "$completion_hook" >"$SDIR/$name.meta"
+    printf '%s\n' "$brief_text" >"$SDIR/$name.brief"
+    printf '%s\n' "$definition" >"$SDIR/$name.definition"
+  fi
 }
 
 # snapshot_hook SOURCE PREFIX: copy a project hook to a unique session path without replacing prior bytes.
@@ -309,9 +351,9 @@ cmd_launch() {
     [[ "$(conf "$team" worktree)" != pair-branch ]] || die 'review needs an existing pair task: run `herdr-crew team review T<n>` for a task that already has crew/T<n>-pair (the manager does this)'
   fi
 
-  # Re-running lead sends the instructions to the running lead. Checked before any workspace work.
-  if [[ "$RANK" == lead ]]; then clear_stale_name "$SLUG-lead"; fi
-  if [[ "$RANK" == lead ]] && herdr agent get "$SLUG-lead" >/dev/null 2>&1; then
+  # Re-running lead uses saved app metadata and verifies its terminal still exists.
+  local existing_term
+  if [[ "$RANK" == lead ]] && existing_term=$(terminal_of "$SLUG-lead") && [[ -n "$existing_term" ]] && hc get "$existing_term" --json >/dev/null 2>&1; then
     cmd_say "$SLUG-lead" "$instr"
     crew_out "$SLUG-lead already running, sent instructions to it"
     return
@@ -320,28 +362,35 @@ cmd_launch() {
   if [[ "$RANK" == lead ]]; then
     agent_selection lead ""; agent_check
     agent_selection manager ""; agent_check
-  else preflight_team "$team"; fi
-  target_ws
-  export CREW_WS="$WS"
-
+    resolve_space
+  else
+    preflight_team "$team"
+    resolve_space
+  fi
   if [[ "$RANK" == lead ]]; then
-    local lead="$SLUG-lead" manager="$SLUG-manager" root orch board
-    # Lead tab: lead in the root pane, manager beside it, board (tsk) below. Each pane is created with its agent's env.
-    set_env "$lead" "" lead
-    root=$(mutj '{"result":{"tab":{"tab_id":"w_dry:t1"},"root_pane":{"pane_id":"w_dry:p1"}}}' \
-      herdr tab create --workspace "$WS" --cwd "$REPO" --label "crew $SLUG" --no-focus "${EV[@]}" \
-      | jq -r '.result.root_pane.pane_id')
-    set_env "$manager" "" manager
-    orch=$(mutj '{"result":{"pane":{"pane_id":"w_dry:p2"}}}' \
-      herdr pane split "$root" --direction right --cwd "$REPO" --no-focus "${EV[@]}" | jq -r '.result.pane.pane_id')
-    set_env "$SLUG-board" ""
-    board=$(mutj '{"result":{"pane":{"pane_id":"w_dry:p3"}}}' \
-      herdr pane split "$root" --direction down --ratio 0.3 --cwd "$REPO" --no-focus "${EV[@]}" | jq -r '.result.pane.pane_id')
-    mut herdr pane run "$board" "tsk"
-    start_agent "$manager" manager "$orch" "" "$(brief "$manager" manager "" "$lead" \
+    local lead="$SLUG-lead" manager="$SLUG-manager" root manager_selection manager_definition manager_context manager_completion lead_selection lead_definition lead_context lead_completion lead_tab lead_term manager_tab manager_term manager_pane label="crew $SLUG" lead_argv manager_argv board_argv
+    resolve_space
+    agent_argv "$lead" lead "" ""
+    lead_selection=$AGENT_SELECTION; lead_definition=$AGENT_DEFINITION; lead_context=$AGENT_CONTEXT_HOOK; lead_completion=$AGENT_COMPLETION_HOOK
+    lead_argv=$(app_argv_json)
+    target_space "crew-$SLUG" "$label" "$REPO" "$lead_argv"
+    export CREW_WS="$WS"
+    if [[ -n "$TARGET_TAB" ]]; then lead_tab=$TARGET_TAB; lead_term=$TARGET_TERM; root=$TARGET_PANE
+    else
+      create_tab "$WS" "$label" "$REPO" "$lead_argv"
+      lead_tab=$NEW_TAB; lead_term=$NEW_TERM; root=$NEW_PANE
+    fi
+    agent_argv "$manager" manager "" ""
+    manager_selection=$AGENT_SELECTION; manager_definition=$AGENT_DEFINITION; manager_context=$AGENT_CONTEXT_HOOK; manager_completion=$AGENT_COMPLETION_HOOK
+    manager_argv=$(app_argv_json)
+    split_pane "$root" right "$manager_argv"
+    manager_pane=$NEW_PANE; manager_term=$NEW_TERM; manager_tab=$lead_tab
+    ARGV=(tsk); board_argv=$(app_argv_json)
+    split_pane "$root" down "$board_argv"
+    start_agent "$manager" manager "$WS" "$manager_tab" "$manager_term" "$manager_pane" "$label" "" "$(brief "$manager" manager "" "$lead" \
       "Wait for the lead to send you task numbers (T#) via herdr-crew say. Then spawn teams: herdr-crew team <team> <T#> [--persona <job>=<domain>]... Domain personas: $(persona_names). Never edit code." \
-      "$REPO" "pragmatic-senior")"
-    start_agent "$lead" lead "$root" "" "$(brief "$lead" lead "" "$manager" "$instr" "$REPO" "$(slot_list "" "$DOMAINS")")"
+      "$REPO" "pragmatic-senior")" "" "$manager_selection" "$manager_definition" "$manager_context" "$manager_completion"
+    start_agent "$lead" lead "$WS" "$lead_tab" "$lead_term" "$root" "$label" "" "$(brief "$lead" lead "" "$manager" "$instr" "$REPO" "$(slot_list "" "$DOMAINS")")" "" "$lead_selection" "$lead_definition" "$lead_context" "$lead_completion"
     crew_out "lead tab 'crew $SLUG' ready: $lead, $manager (board pane bottom-left)"
     return
   fi
@@ -365,8 +414,8 @@ cmd_launch() {
 # cmd_team TEAM T# [--persona JOB=DOMAIN[+DOMAIN]]... [INSTR]: worktree, one tab, one pane per member, start + brief each agent
 cmd_team() {
   local team=${1:?usage: team <team> <T#>} T=${2:?usage: team <team> <T#>} instr="" pmap="" e doms d
-  local members wt base cwd path rank job n mates dir i m
-  local names=() ranks=() jobs=() panes=()
+  local members wt base cwd path rank job n mates dir i m label space tab root argv_json
+  local names=() ranks=() jobs=() panes=() terms=() selections=() definitions=() contexts=() completions=()
   shift 2
   while [[ $# -gt 0 ]]; do
     case $1 in
@@ -382,11 +431,12 @@ cmd_team() {
     for d in ${doms//+/ }; do check_domain "$d"; done
   done
   preflight_team "$team"
-  if [[ -n "${CREW_WS:-}" ]]; then WS=$CREW_WS; else target_ws; fi
   members=$(conf "$team" members); wt=$(conf "$team" worktree)
   [[ -n "$instr" ]] || instr=$(tsk list "$T" --json 2>/dev/null | jq -r '.[0].notes // ""' 2>/dev/null || true)
   [[ -n "$instr" ]] || instr="(read the task: tsk list $T --json)"
   cwd="$REPO"; path="$HOME/.herdr/worktrees/$SLUG/$T-$team"
+  if [[ "$wt" == pair-branch ]]; then branch_exists "crew/$T-pair" || die "no branch crew/$T-pair: run 'team pair $T' first"; fi
+  resolve_space
   case "$wt" in
     new|from-pair)
       if [[ -e "$path" ]]; then
@@ -414,24 +464,35 @@ cmd_team() {
     if [[ "$m" == *@* ]]; then job=${m#*@}; fi
     ranks+=("$rank"); jobs+=("$job"); names+=("$(agent_name "$T" "${job:-$rank}")")
   done
-  # One pane per member, each created with its own env: first is the tab's root pane, the rest splits of it
+  # Create worktree first. Then the first argv becomes the space's real initial tab if needed.
+  label="$T $team"
   for ((i = 0; i < ${#names[@]}; i++)); do
-    set_env "${names[$i]}" "$T" "${ranks[$i]}" "${jobs[$i]}"
+    agent_argv "${names[$i]}" "${ranks[$i]}" "$T" "${jobs[$i]}"
+    selections+=("$AGENT_SELECTION"); definitions+=("$AGENT_DEFINITION")
+    contexts+=("$AGENT_CONTEXT_HOOK"); completions+=("$AGENT_COMPLETION_HOOK")
+    argv_json=$(app_argv_json)
     if (( i == 0 )); then
-      panes+=("$(mutj '{"result":{"tab":{"tab_id":"w_dry:t9"},"root_pane":{"pane_id":"w_dry:p9"}}}' \
-        herdr tab create --workspace "$WS" --cwd "$cwd" --label "$T $team" --no-focus "${EV[@]}" \
-        | jq -r '.result.root_pane.pane_id')")
+      target_space "crew-$SLUG" "$label" "$cwd" "$argv_json"
+      export CREW_WS="$WS"
+      space=$WS
+      if [[ -n "$TARGET_TAB" ]]; then tab=$TARGET_TAB; terms+=("$TARGET_TERM"); panes+=("$TARGET_PANE")
+      else
+        create_tab "$space" "$label" "$cwd" "$argv_json"
+        tab=$NEW_TAB; terms+=("$NEW_TERM"); panes+=("$NEW_PANE")
+      fi
     else
       dir=down; if (( i == 1 )); then dir=right; fi
-      panes+=("$(mutj "{\"result\":{\"pane\":{\"pane_id\":\"w_dry:p$((i+10))\"}}}" \
-        herdr pane split "${panes[0]}" --direction "$dir" --cwd "$cwd" --no-focus "${EV[@]}" | jq -r '.result.pane.pane_id')")
+      split_pane "$root" "$dir" "$argv_json"
+      panes+=("$NEW_PANE"); terms+=("$NEW_TERM")
     fi
+    (( i != 0 )) || root=${panes[0]}
   done
   for ((i = 0; i < ${#names[@]}; i++)); do
     n=${names[$i]}; mates=""
     for m in "${names[@]}"; do [[ "$m" == "$n" ]] || mates="$mates $m"; done
-    start_agent "$n" "${ranks[$i]}" "${panes[$i]}" "$T" "$(brief "$n" "${ranks[$i]}" "$T" "$mates" "$instr" "$cwd" \
-      "$(slot_list "${jobs[$i]}" "$(pmap_for "${jobs[$i]}")")")" "${jobs[$i]}"
+    start_agent "$n" "${ranks[$i]}" "$space" "$tab" "${terms[$i]}" "${panes[$i]}" "$label" "$T" \
+      "$(brief "$n" "${ranks[$i]}" "$T" "$mates" "$instr" "$cwd" "$(slot_list "${jobs[$i]}" "$(pmap_for "${jobs[$i]}")")")" \
+      "${jobs[$i]}" "${selections[$i]}" "${definitions[$i]}" "${contexts[$i]}" "${completions[$i]}"
   done
   crew_out "team $team for $T in tab '$T $team' (agents: ${names[*]})"
 }
@@ -603,10 +664,12 @@ cmd_handoff() {
 # restart_one NAME: /exit the agent, wait for its pane to reach the shell, start it again from its saved meta and brief.
 # The brief gets a resume line when a handoff exists; keep that path readable.
 restart_one() {
-  local name=$1 rank job pane task i ready="" pi handoff brief selection definition context_hook completion_hook
+  local name=$1 rank job pane task i ready="" pi handoff brief selection definition context_hook completion_hook space tab terminal label arg_index
   [[ -f "$SDIR/$name.meta" && -f "$SDIR/$name.brief" ]] || die "no saved state for $name (start it with herdr-crew first)"
   rank=$(sed -n 's/^rank=//p' "$SDIR/$name.meta"); job=$(sed -n 's/^job=//p' "$SDIR/$name.meta")
   pane=$(sed -n 's/^pane=//p' "$SDIR/$name.meta"); task=$(sed -n 's/^task=//p' "$SDIR/$name.meta")
+  space=$(sed -n 's/^space=//p' "$SDIR/$name.meta"); tab=$(sed -n 's/^tab=//p' "$SDIR/$name.meta")
+  terminal=$(sed -n 's/^terminal=//p' "$SDIR/$name.meta"); label=$(sed -n 's/^label=//p' "$SDIR/$name.meta")
   selection=$(sed -n 's/^selection=//p' "$SDIR/$name.meta")
   if [[ -n "$selection" ]]; then
     # The pane retains its original environment, including the OpenCode session policy.
@@ -635,7 +698,16 @@ restart_one() {
   handoff="$SDIR/handoff-$name.md"
   brief=$(sed '/^Resume from your handoff: /d' "$SDIR/$name.brief")  # drop the resume line of an earlier restart
   if [[ -f "$handoff" ]]; then brief="$brief"$'\n'"Resume from your handoff: $handoff. Read it first. The board and the handoff show work already done: do not redo it, and do not create tasks that already exist."; fi
-  start_agent "$name" "$rank" "$pane" "$task" "$brief" "$job" "$selection" "$definition" "$context_hook" "$completion_hook"
+  load_definitions
+  agent_argv "$name" "$rank" "$task" "$job" "$selection" "$definition" "$context_hook" "$completion_hook"
+  if [[ "$AGENT_KIND" == opencode ]]; then
+    mut herdr agent start "$name" --pane "$pane" --timeout 120000 --kind opencode -- --standalone
+  else
+    arg_index=0
+    for ((i = 0; i < ${#ARGV[@]}; i++)); do [[ "${ARGV[$i]}" == claude ]] && { arg_index=$((i + 1)); break; }; done
+    mut herdr agent start "$name" --pane "$pane" --timeout 120000 --kind claude -- "${ARGV[@]:$arg_index}"
+  fi
+  start_agent "$name" "$rank" "$space" "$tab" "$terminal" "$pane" "$label" "$task" "$brief" "$job" "$selection" "$definition" "$context_hook" "$completion_hook"
   # Keep the referenced handoff readable for the restarted agent.
   crew_out "restarted $name"
 }

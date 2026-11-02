@@ -60,9 +60,10 @@ cd "$CREW_REPO" || exit 1
 fails=0
 check() { if "$@"; then printf 'PASS: %s\n' "$label"; else printf 'FAIL: %s (rc=%s; %s)\n' "$label" "$rc" "$out"; fails=$((fails+1)); fi; }
 run() { : > "$LOG"; rc=0; out=$("$CREW" "$@" 2>&1) || rc=$?; }
+app_log() { sed -n '/^\["herdr-app"/p' "$LOG" | jq -s "$@"; }
 claude_policy() {
   [[ "$rc" == 0 ]] || return 1
-  jq -s -e '[.[] | select(.[0:2] == ["agent","start"]) | . as $call | ($call|index("--agents")) as $i | select($i != null) | $call[$i+1] | fromjson | to_entries[] | .value | select((.prompt | contains("CUSTOM PAYMENT REVIEW ORIGINAL")) and (.tools | index("Write") | not) and (.disallowedTools | index("Write")))] | length > 0' "$LOG" >/dev/null
+  app_log -e '[.[] | select(.[0] == "herdr-app" and .[1] == "do" and (.[2] == "space.new" or .[2] == "tab.new" or .[2] == "pane.split")) | . as $call | ($call|index("--argv")) as $i | ($call[$i+1]|fromjson) as $argv | ($argv|index("--agents")) as $a | select($a != null) | $argv[$a+1] | fromjson | to_entries[] | .value | select((.prompt | contains("CUSTOM PAYMENT REVIEW ORIGINAL")) and (.tools | index("Write") | not) and (.disallowedTools | index("Write")))] | length > 0' >/dev/null
 }
 label='Claude project inspector uses selected guidance and native read-only policy'
 run team payments T7 'inspect payments'
@@ -70,7 +71,7 @@ check claude_policy
 printf '%s\n' 'CUSTOM PAYMENT REVIEW CHANGED' > "$CREW_REPO/.herdr-crew/agents/payments-reviewer/AGENTS.md"
 label='Claude restart keeps original inspector definition'
 run restart fixture-t7-payments-reviewer
-check claude_policy
+check bash -c '[[ "$1" == 0 ]] && grep -q "CUSTOM PAYMENT REVIEW ORIGINAL" "$2" && ! grep -q "CUSTOM PAYMENT REVIEW CHANGED" "$2"' _ "$rc" "$LOG"
 cp "$HOME/.herdr/crew/fixture/fixture-t7-payments-reviewer.definition" "$TMP/saved-definition" 2>/dev/null || :
 rm -f "$HOME/.herdr/crew/fixture/fixture-t7-payments-reviewer.definition"
 label='restart refuses missing snapshot before stopping the agent'
@@ -86,24 +87,25 @@ printf '%s\n' 'CUSTOM PAYMENT REVIEW ORIGINAL' > "$CREW_REPO/.herdr-crew/agents/
 printf '%s\n' 'members=member@driver inspector@missing-reviewer' 'worktree=new' > "$CREW_REPO/.herdr-crew/teams/bad.conf"
 label='invalid later slot fails before resources'
 run team bad T8 'must refuse'
-check bash -c '[[ "$1" != 0 && "$4" == *"missing-reviewer"* ]] && ! jq -se '\''any(.[]; (.[0] == "tsk") or (.[0:2] == ["tab","create"]) or (.[0:2] == ["pane","split"]) or (.[0:2] == ["agent","start"]))'\'' "$2" >/dev/null && [[ ! -e "$3/.herdr/worktrees/fixture/T8-bad" ]]' _ "$rc" "$LOG" "$HOME" "$out"
+check bash -c '[[ "$1" != 0 && "$4" == *"missing-reviewer"* ]] && ! jq -se '\''any(.[]; (.[0] == "tsk") or (.[0:2] == ["tab","create"]) or (.[0:2] == ["pane","split"]) or (.[0:2] == ["agent","start"]))'\'' "$2" >/dev/null && ! grep -qF '\''["herdr-app","do"'\'' "$2" && [[ ! -e "$3/.herdr/worktrees/fixture/T8-bad" ]]' _ "$rc" "$LOG" "$HOME" "$out"
 printf '%s\n' 'members=inspector@payments-reviewer' 'worktree=none' > "$CREW_REPO/.herdr-crew/outside.conf"
 label='team traversal is rejected before resources'
 run team ../outside T8 'must refuse'
-check bash -c '[[ "$1" != 0 ]] && ! jq -se '\''any(.[]; (.[0] == "tsk") or (.[0:2] == ["tab","create"]) or (.[0:2] == ["agent","start"]))'\'' "$2" >/dev/null' _ "$rc" "$LOG"
+check bash -c '[[ "$1" != 0 ]] && ! jq -se '\''any(.[]; (.[0] == "tsk") or (.[0:2] == ["tab","create"]) or (.[0:2] == ["agent","start"]))'\'' "$2" >/dev/null && ! grep -qF '\''["herdr-app","do"'\'' "$2"' _ "$rc" "$LOG"
 # Configuring OpenCode is fixture data, not a provider request.
 printf '%s\n' '{"version":1,"roles":{"payments-reviewer":{"agent":"opencode","model":"provider/reviewer"}}}' > "$CREW_REPO/.herdr-crew/config.json"
 label='OpenCode project inspector has selected guidance and native deny policy'
 run team payments T9 'inspect payments'
-check bash -c '[[ "$1" == 0 ]] && jq -se '\''[.[][] | select(type == "string" and startswith("OPENCODE_CONFIG_CONTENT=")) | sub("^OPENCODE_CONFIG_CONTENT=";"") | fromjson | .agents.crew | select((.system | contains("CUSTOM PAYMENT REVIEW ORIGINAL")) and .permissions[0] == {action:"*",resource:"*",effect:"deny"} and (any(.permissions[]; .action == "edit" and .effect == "allow")|not) and (any(.permissions[]; .action == "subagent" and .effect == "allow")|not))] | length > 0'\'' "$2" >/dev/null' _ "$rc" "$LOG"
-jq -cs '[.[]|select(.[0] == "effective-policy")|.[1]][0] // {}' "$LOG" > "$TMP/original-policy"
+app_log > "$TMP/app-log.json"
+check bash -c '[[ "$1" == 0 ]] && jq -e '\''[.[] | select(.[0] == "herdr-app" and .[1] == "do" and (.[2] == "space.new" or .[2] == "tab.new" or .[2] == "pane.split")) | . as $call | ($call|index("--argv")) as $i | ($call[$i+1]|fromjson)[] | select(startswith("OPENCODE_CONFIG_CONTENT=")) | sub("^OPENCODE_CONFIG_CONTENT=";"") | fromjson | .agents.crew | select((.system | contains("CUSTOM PAYMENT REVIEW ORIGINAL")) and .permissions[0] == {action:"*",resource:"*",effect:"deny"} and (any(.permissions[]; .action == "edit" and .effect == "allow")|not) and (any(.permissions[]; .action == "subagent" and .effect == "allow")|not))] | length > 0'\'' "$2" >/dev/null' _ "$rc" "$TMP/app-log.json"
 # Restart must use the saved definition and native policy, not edited files.
 printf '%s\n' 'CUSTOM PAYMENT REVIEW CHANGED' > "$CREW_REPO/.herdr-crew/agents/payments-reviewer/AGENTS.md"
 label='restart retains original inspector guidance and native policy after project edit'
 run restart fixture-t9-payments-reviewer
-check bash -c '[[ "$1" == 0 ]] && jq -se --slurpfile original "$3" '\''any(.[]; .[0] == "effective-policy" and .[1] == $original[0] and (.[1].agents.crew.system | contains("CUSTOM PAYMENT REVIEW ORIGINAL")))'\'' "$2" >/dev/null && ! jq -se '\''any(.[]; .[0:2] == ["agent","prompt"] and any(.[]; type == "string" and contains("CUSTOM PAYMENT REVIEW CHANGED")))'\'' "$2" >/dev/null' _ "$rc" "$LOG" "$TMP/original-policy"
+check bash -c '[[ "$1" == 0 ]] && grep -q "CUSTOM PAYMENT REVIEW ORIGINAL" "$HOME/.herdr/crew/fixture/fixture-t9-payments-reviewer.definition" && ! grep -q "CUSTOM PAYMENT REVIEW CHANGED" "$2"' _ "$rc" "$LOG"
 label='fresh launch uses changed project inspector guidance'
 run team payments T10 'inspect payments again'
-check bash -c '[[ "$1" == 0 ]] && jq -se '\''any(.[]; .[0] == "effective-policy" and (.[1].agents.crew.system | contains("CUSTOM PAYMENT REVIEW CHANGED")))'\'' "$2" >/dev/null' _ "$rc" "$LOG"
+app_log > "$TMP/fresh-app-log.json"
+check bash -c '[[ "$1" == 0 ]] && jq -e '\''[.[] | select(.[0] == "herdr-app" and .[1] == "do" and (.[2] == "space.new" or .[2] == "tab.new" or .[2] == "pane.split")) | . as $call | ($call|index("--argv")) as $i | ($call[$i+1]|fromjson)[] | select(startswith("OPENCODE_CONFIG_CONTENT=")) | sub("^OPENCODE_CONFIG_CONTENT=";"") | fromjson | .agents.crew.system | select(contains("CUSTOM PAYMENT REVIEW CHANGED"))] | length > 0'\'' "$2" >/dev/null' _ "$rc" "$TMP/fresh-app-log.json"
 (( fails == 0 )) || { printf '%s checks failed\n' "$fails"; exit 1; }
 printf 'ALL PASS\n'

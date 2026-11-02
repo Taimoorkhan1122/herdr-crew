@@ -45,7 +45,7 @@ case "$1 $2" in
   "agent read") [[ ! -f "$STATE/paste" ]] || echo '[Pasted text #1 +80 lines]' ;;
   "agent send-keys") echo "herdr $*" >>"$LOG"; [[ "$4" != enter ]] || touch "$STATE/entered" ;;
   "agent prompt") echo "herdr $*" >>"$LOG"
-    if [[ "$4" == /exit ]]; then touch "$STATE/shell"; [[ ! -f "$STATE/gone" ]]; else :; fi ;;
+    if [[ "$4" == /exit ]]; then touch "$STATE/shell"; [[ ! -f "$STATE/gone" ]]; else [[ -f "$STATE/$3" ]] || echo idle >"$STATE/$3"; fi ;;
   "pane read") printf '%s\n' "❯ No, exit" "  Yes, I trust this folder" ;;
   "pane process-info") echo "herdr $*" >>"$LOG"
     if [[ -f "$STATE/live" || ( ! -f "$STATE/stale" && ! -f "$STATE/shell" ) ]]; then echo '{"result":{"process_info":{"foreground_process_group_id":2,"shell_pid":1}}}'; exit 0; fi
@@ -97,16 +97,23 @@ reset() { : >"$LOG"; }
 cnt() { grep -c -- "$1" "$LOG" || true; }
 in_log() { if grep -qF -- "$2" "$LOG"; then pass "$1"; else flunk "$1 (missing: $2)"; fi; }
 in_out() { if grep -qF -- "$2" <<<"$3"; then pass "$1"; else flunk "$1 (missing: $2)"; fi; }
-# panes_ok LABEL: every pane split / tab create carries CREW_WS and CREW_AGENT, and that agent starts in that pane
+json_log() { sed -n '/^\["herdr-app"/p' "$LOG" | jq -s "$@"; }
+app_argv_text() { json_log -r '[.[] | select(.[0] == "herdr-app" and .[1] == "do" and (index("--argv") != null)) | . as $call | ($call | index("--argv")) as $i | ($call[$i + 1] | fromjson | join(" "))] | join("\n")'; }
+app_settings() { json_log -r '[.[] | select(.[0] == "herdr-app" and .[1] == "do" and (index("--argv") != null)) | . as $call | ($call | index("--argv")) as $i | ($call[$i + 1] | fromjson) as $argv | ($argv | index("--settings")) as $s | select($s != null) | $argv[$s + 1]][-1] // empty'; }
+app_agents_json() { json_log -r '[.[] | select(.[0] == "herdr-app" and .[1] == "do" and (index("--argv") != null)) | . as $call | ($call | index("--argv")) as $i | ($call[$i + 1] | fromjson) as $argv | ($argv | index("--agents")) as $a | select($a != null) | $argv[$a + 1]][0] // empty'; }
+app_agent_count() { json_log '[.[] | select(.[0] == "herdr-app" and .[1] == "do" and (index("--argv") != null)) | . as $call | ($call | index("--argv")) as $i | ($call[$i + 1] | fromjson) as $argv | select(any($argv[]; startswith("CREW_AGENT=")))] | length'; }
+# panes_ok LABEL: each app-created agent terminal receives the complete crew environment.
 panes_ok() {
-  local bad=0 line pane agent
-  while IFS= read -r line; do
-    pane=${line##*-> }; agent=$(sed -n 's/.* CREW_AGENT=\([^ ]*\).*/\1/p' <<<"$line")
-    [[ "$line" == *" CREW_WS=w"* ]] || bad=$((bad+1))
-    [[ "$agent" == *-board ]] && continue
-    grep -qF -- "agent start $agent --pane $pane " "$LOG" || bad=$((bad+1))
-  done < <(grep -E 'pane split|tab create' "$LOG")
-  if (( bad == 0 )); then pass "$1"; else flunk "$1 ($bad bad panes)"; fi
+  if json_log -e '
+    [.[] | select(.[0] == "herdr-app" and .[1] == "do" and
+      (.[2] == "space.new" or .[2] == "tab.new" or .[2] == "pane.split"))]
+    | all(.[]; . as $call | ($call | index("--argv")) as $i |
+      ($call[$i + 1] | fromjson) as $argv |
+      if $argv == ["tsk"] then true else
+        all(["CREW_SLUG=", "CREW_TASK=", "CREW_AGENT=", "CREW_WS="][];
+          . as $prefix | any($argv[]; startswith($prefix)))
+      end)
+  ' >/dev/null; then pass "$1"; else flunk "$1 (incomplete app argv)"; fi
 }
 # reject LABEL WANT STDIN ARGS...: must fail with WANT and must not reach herdr, tsk or git worktree
 reject() {
@@ -116,41 +123,60 @@ reject() {
   if (( rc != 0 )) && grep -qF -- "$want" <<<"$out" && [[ $(wc -l <"$LOG") == "$before" ]]; then pass "$label"; else flunk "$label (rc=$rc, out: $out)"; fi
 }
 
-# 1. lead tab: tab + 3 panes, lead in the root pane, manager and board split off it, no worktree
+# 1. lead tab: app space with lead root, manager and board split off it, no worktree
 reset
 out=$(echo "add hello.txt" | "$CREW" launch lead - 2>&1)
 in_out "lead: ready" "ready: $S-lead" "$out"
-in_log "lead: tab create with the lead's env" "tab create --workspace w1 --cwd $REPO --label crew $S --no-focus --env CREW_SLUG=$S"
-in_log "lead: lead starts in root pane with crew-lead" "agent start $S-lead --pane w1:p1 --timeout 120000 --kind claude -- --agent crew-lead -n $S-lead"
-in_log "lead: manager starts with crew-manager" "--agent crew-manager -n $S-manager"
-in_log "lead: board pane runs tsk" "pane run"
-[[ $(cnt 'pane split') == 2 ]] && pass "lead: 2 splits (3 panes)" || flunk "lead: expected 2 splits"
+json_log -e '([.[] | select(.[0:3] == ["herdr-app","do","space.new"]) ] | length) == 1 and ([.[] | select(.[0:3] == ["herdr-app","do","pane.split"]) ] | length) == 2' >/dev/null \
+  && pass "lead: one app space and two pane splits" || flunk "lead: app topology is incomplete"
+json_log -e 'all(.[] | select(.[0] == "herdr-app"); (index("--env") == null))' >/dev/null \
+  && pass "lead: app argv uses env prefix, not --env" || flunk "lead: app log contains --env"
+json_log -e 'any(.[]; .[0:3] == ["herdr-app","do","pane.split"] and .[4] == "down" and .[-1] == "[\"tsk\"]")' >/dev/null \
+  && pass "lead: board is tsk in the down split" || flunk "lead: board argv or direction is wrong"
+space_id=$(jq -r '.id // empty' "$STATE/space" 2>/dev/null || true)
+json_log --arg space "$space_id" -e 'all([.[] | select(.[0] == "herdr-app" and .[1] == "do" and (.[2] == "pane.split"))][]; . as $call | ($call | index("--argv")) as $i | ($call[$i + 1] | fromjson) as $argv | if $argv == ["tsk"] then true else any($argv[]; . == ("CREW_WS=" + $space)) end)' >/dev/null \
+  && pass "lead: later app argv uses its space ID in CREW_WS" || flunk "lead: later app CREW_WS does not match space"
+for field in "space=$space_id" "tab=tb1" "terminal=t1" "label=crew $S"; do
+  grep -qF "$field" "$HOME/.herdr/crew/$S/$S-lead.meta" && pass "lead: meta saves $field" || flunk "lead: meta missing $field"
+done
 [[ $(cnt 'worktree add') == 0 ]] && pass "lead: no worktree" || flunk "lead: unexpected worktree"
 panes_ok "lead: every pane carries its agent env and CREW_WS"
 
 # 2. team pair on a job persona: task, own branch worktree, driver (member) + navigator (inspector)
 reset
-out=$(echo "fix the login bug" | "$CREW" launch driver - 2>&1)
+space_id=$(jq -r '.id' "$STATE/space")
+out=$(echo "fix the login bug" | env CREW_WS="$space_id" "$CREW" launch driver - 2>&1)
 in_out "pair: task created" "created task T7" "$out"
 in_log "pair: tsk add with --title/--notes/-p repo" "tsk add --title=fix the login bug --notes=fix the login bug -p $REPO --json"
 in_log "pair: new branch in its worktree" "worktree add -b crew/T7-pair $HOME/.herdr/worktrees/$S/T7-pair HEAD"
-in_log "pair: tab in the worktree" "tab create --workspace w1 --cwd $HOME/.herdr/worktrees/$S/T7-pair --label T7 pair"
-in_log "pair: driver is member rank" "--agent crew-member -n $S-t7-driver"
-in_log "pair: navigator is inspector rank" "--agent crew-inspector -n $S-t7-navigator"
-in_log "pair: default domain persona" "Persona (pragmatic-senior)"
-in_log "pair: job skills loaded" "Load these skills now: /tdd /verification-before-completion"
+json_log --arg folder "$HOME/.herdr/worktrees/$S/T7-pair" -e 'any(.[]; .[0:3] == ["herdr-app","do","tab.new"] and (index("--folder") as $i | .[$i+1] == $folder))' >/dev/null \
+  && pass "pair: tab in the worktree" || flunk "pair: tab not created in its worktree"
+in_out "pair: driver is member rank" "--agent crew-member -n $S-t7-driver" "$(app_argv_text)"
+in_out "pair: navigator is inspector rank" "--agent crew-inspector -n $S-t7-navigator" "$(app_argv_text)"
+in_out "pair: default domain persona" "Persona (pragmatic-senior)" "$(cat "$HOME/.herdr/crew/$S/$S-t7-driver.brief")"
+in_out "pair: job skills loaded" "Load these skills now: /tdd /verification-before-completion" "$(cat "$HOME/.herdr/crew/$S/$S-t7-driver.brief")"
+for field in space tab terminal label; do
+  if grep -q "^$field=." "$HOME/.herdr/crew/$S/$S-t7-driver.meta"; then pass "pair: meta saves $field"; else flunk "pair: meta missing $field"; fi
+done
+for agent in "$S-t7-driver" "$S-t7-navigator"; do
+  for field in space tab terminal label; do
+    grep -q "^$field=." "$HOME/.herdr/crew/$S/$agent.meta" && pass "pair: $agent meta saves $field" || flunk "pair: $agent meta missing $field"
+  done
+done
+json_log --arg space "$space_id" -e 'all([.[] | select(.[0] == "herdr-app" and .[1] == "do" and (index("--argv") != null))][]; . as $call | ($call | index("--argv")) as $i | ($call[$i+1] | fromjson) as $argv | if any($argv[]; . == "tsk") then true else any($argv[]; . == ("CREW_WS=" + $space)) end)' >/dev/null \
+  && pass "pair: agent argv uses live CREW_WS space ID" || flunk "pair: agent argv has wrong CREW_WS"
 panes_ok "pair: every pane carries its agent env and CREW_WS"
 
 # 3. review checks out the pair branch; test branches from it (or from HEAD when no pair branch)
 reset
 out=$(BRANCH_EXISTS=1 "$CREW" team review T7 "check it" 2>&1)
 in_log "review: detached checkout of crew/T7-pair" "worktree add --detach $HOME/.herdr/worktrees/$S/T7-review crew/T7-pair"
-in_log "review: reviewer starts as inspector" "--agent crew-inspector -n $S-t7-code-reviewer"
+in_out "review: reviewer starts as inspector" "--agent crew-inspector -n $S-t7-code-reviewer" "$(app_argv_text)"
 panes_ok "review: every pane carries its agent env and CREW_WS"
 reset
 out=$(BRANCH_EXISTS=1 "$CREW" team test T7 "write tests" 2>&1)
 in_log "test: new branch from crew/T7-pair" "worktree add -b crew/T7-test $HOME/.herdr/worktrees/$S/T7-test crew/T7-pair"
-in_log "test: tester is member rank" "--agent crew-member -n $S-t7-tester"
+in_out "test: tester is member rank" "--agent crew-member -n $S-t7-tester" "$(app_argv_text)"
 reset
 out=$("$CREW" team test T8 "write tests" 2>&1)
 in_log "test: falls back to HEAD without a pair branch" "worktree add -b crew/T8-test $HOME/.herdr/worktrees/$S/T8-test HEAD"
@@ -162,7 +188,7 @@ out=$(echo "-fix parser" | "$CREW" launch driver - 2>&1)
 in_log "dash text: = form keeps the title" "tsk add --title=-fix parser --notes=-fix parser -p $REPO --json"
 
 # 5. say: idle agent gets a prompt from the real sender; busy agent gets a queued step, exit 0
-reset
+reset; echo idle >"$STATE/$S-t7-driver"
 CREW_AGENT=$S-t7-navigator "$CREW" say "$S-t7-driver" "hello there" >/dev/null
 in_log "say idle: prompt from the real sender" "agent prompt $S-t7-driver [from $S-t7-navigator] hello there"
 echo working >"$STATE/$S-t7-driver"; reset
@@ -182,26 +208,25 @@ in_log "mark: real agent name in the pane title" "T7 $S-t7-driver: tests pass"
 out=$("$CREW" status 2>&1)
 in_out "status: driver name and state" "$S-t7-driver"$'\t'"working" "$out"
 
-# 8. lead re-run: say, no tab
+# 8. lead re-run: probes its saved terminal and does not create another app tab
 reset
 out=$(echo "more work" | "$CREW" launch lead - 2>&1)
 in_out "lead re-run: sends to the running lead" "already running" "$out"
-in_log "lead re-run: prompt from the user" "agent prompt $S-lead [from user] more work"
-[[ $(cnt 'tab create') == 0 ]] && pass "lead re-run: no tab created" || flunk "lead re-run: created a tab"
+[[ $(cnt 'space.new') == 0 && $(cnt 'tab.new') == 0 ]] && pass "lead re-run: no app tab created" || flunk "lead re-run: created an app tab"
 
-# 9. trust dialog: agent_not_ready, then select Yes (down), Enter, wait, brief
+# 9. Trust handling moves to the hc readiness task.
 reset; touch "$TMP/trust"
 out=$(echo "fix trust" | "$CREW" launch driver - 2>&1)
-in_log "trust: select Yes first (down)" "send-keys $S-t7-driver down"
-in_log "trust: then Enter" "send-keys $S-t7-driver enter"
-[[ "$(grep -m1 send-keys "$LOG")" == *" down" ]] && pass "trust: down comes before enter" || flunk "trust: wrong key order"
+[[ $(cnt 'agent start') == 0 ]] && pass "trust: no legacy agent start call" || flunk "trust: used legacy agent start"
+rm -f "$TMP/trust"
 
-# 10. outside Herdr: reuse the crew workspace instead of creating another
-reset; echo "crew-$S" >"$STATE/ws"
+# 10. outside legacy Herdr: reuse the named app space
+reset
 out=$(echo "reuse" | env -u HERDR_ENV "$CREW" launch driver - 2>&1)
-in_log "outside herdr: reuses crew workspace w9" "tab create --workspace w9"
-[[ $(cnt 'workspace create') == 0 ]] && pass "outside herdr: no new workspace" || flunk "outside herdr: created a workspace"
-rm -f "$STATE/ws"
+space_id=$(jq -r '.id' "$STATE/space")
+json_log --arg space "$space_id" -e 'any(.[]; .[0:3] == ["herdr-app","do","tab.new"] and (index("--space") as $i | .[$i+1] == $space))' >/dev/null \
+  && pass "outside app: reuses the named crew space" || flunk "outside app: did not reuse the crew space"
+[[ $(cnt 'space.new') == 0 ]] && pass "outside app: no second space" || flunk "outside app: created another space"
 
 # 11. same-prefix repos get different slugs
 for r in client-portal-web client-portal-api; do mkdir -p "$TMP/$r"; "$REAL_GIT" -C "$TMP/$r" init -q; done
@@ -217,7 +242,7 @@ reject "reject: team unknown domain" "unknown persona 'nope'" "" team pair T3 --
 reject "reject: team job not in team" "has no job 'tester'" "" team pair T3 --persona tester=react-expert
 
 # 13. AXI: driver brief names gh-axi, navigator brief has no AXI line, a missing tool warns and does not fail
-brief_of() { awk -v n="herdr agent prompt $1 " 'index($0,n)==1{p=1;next} /^herdr /{p=0} p' "$LOG"; }
+brief_of() { cat "$HOME/.herdr/crew/$S/$1.brief" 2>/dev/null || true; }
 reset
 out=$(echo "axi check" | "$CREW" launch driver - 2>&1)
 drv=$(brief_of "$S-t7-driver"); nav=$(brief_of "$S-t7-navigator")
@@ -235,11 +260,19 @@ in_out "axi missing: launch still creates the task" "created task T7" "$out"
 # 14. review spec on a new task: dies before any tsk, herdr or git call (reject checks the log is unchanged)
 reject "review launch: refuses before creating a task" "review needs an existing pair task" "review me" launch code-reviewer -
 
-# 15. team outside crew panes (no CREW_WS): the tab goes in HERDR_WORKSPACE_ID
+# 15. terminal labels recover the app space when CREW_WS is absent
 reset
-out=$(env -u CREW_WS HERDR_ENV=1 HERDR_WORKSPACE_ID=w5 "$CREW" team pair T7 "do it" 2>&1)
-in_log "team fallback: tab in HERDR_WORKSPACE_ID" "tab create --workspace w5 --cwd $HOME/.herdr/worktrees/$S/T7-pair --label T7 pair"
-panes_ok "team fallback: every pane carries CREW_WS=w5"
+space_id=$(jq -r '.id' "$STATE/space")
+terminal_id=""
+for term_file in "$STATE"/term.*; do
+  if jq -e --arg space "$space_id" '.labels["herdr.space"] == $space' "$term_file" >/dev/null 2>&1; then terminal_id=${term_file##*/term.}; fi
+done
+out=$(env -u CREW_WS HC_TERMINAL_ID="$terminal_id" "$CREW" team pair T7 "do it" 2>&1)
+json_log --arg space "$space_id" -e 'any(.[]; .[0:3] == ["herdr-app","do","tab.new"] and (index("--space") as $i | .[$i+1] == $space))' >/dev/null \
+  && pass "team fallback: app tab uses terminal label space" || flunk "team fallback: wrong app space"
+grep -qF "[\"hc\",\"get\",\"$terminal_id\",\"--json\"]" "$LOG" \
+  && pass "team fallback: checks HC_TERMINAL_ID label" || flunk "team fallback: did not inspect terminal label"
+panes_ok "team fallback: every pane carries the resolved CREW_WS"
 
 # 16. launch sets the new task to ready after tsk add
 reset
@@ -281,11 +314,11 @@ out=$(hook "$CTXDIR/small.jsonl" s1000 | CREW_SLUG=$S "$GUARD")
 out=$(hook "$CTXDIR/missing.jsonl" s404 | CREW_SLUG=$S "$GUARD"); rc=$?
 (( rc == 0 )) && [[ -z "$out" ]] && pass "ctx-guard: missing transcript exits 0 and stays silent" || flunk "ctx-guard: missing transcript (rc=$rc)"
 
-# Launched agents register saved context hooks and retain metadata for restart.
+# App-created agents retain their saved context hooks and native arguments.
 reset
 out=$(echo "budget check" | "$CREW" launch driver - 2>&1)
-in_log "budget: start passes --settings" "--settings"
-in_log "budget: settings register a saved context hook" ".context-limit."
+in_out "budget: app argv passes --settings" "--settings" "$(app_argv_text)"
+in_out "budget: settings register a saved context hook" ".context-limit." "$(app_argv_text)"
 [[ -f "$HOME/.herdr/crew/$S/$S-t7-driver.meta" ]] && pass "budget: meta file saved" || flunk "budget: no meta file"
 [[ -f "$HOME/.herdr/crew/$S/$S-t7-driver.brief" ]] && pass "budget: brief file saved" || flunk "budget: no brief file"
 in_out "budget: brief names the context budget" "Context budget" "$(cat "$HOME/.herdr/crew/$S/$S-t7-driver.brief")"
@@ -303,7 +336,7 @@ reset
 out=$("$CREW" restart "$S-t7-driver" 2>&1)
 in_log "restart: /exit the agent" "agent prompt $S-t7-driver /exit"
 in_log "restart: starts the agent again" "agent start $S-t7-driver --pane"
-in_log "restart: brief resumes from the handoff" "Resume from your handoff: $HOME/.herdr/crew/$S/handoff-$S-t7-driver.md"
+in_out "restart: saved brief resumes from the handoff" "Resume from your handoff: $HOME/.herdr/crew/$S/handoff-$S-t7-driver.md" "$(cat "$HOME/.herdr/crew/$S/$S-t7-driver.brief")"
 [[ -f "$HOME/.herdr/crew/$S/handoff-$S-t7-driver.md" ]] && pass "restart: handoff remains readable" || flunk "restart: handoff missing"
 
 # watch: a status change prints one line, unchanged tasks print nothing (two polls)
@@ -329,21 +362,8 @@ rc=0; out=$("$CREW" restart "$S-t7-driver" 2>&1) || rc=$?
 in_log "restart gone: reaches start" "agent start $S-t7-driver"
 rm -f "$STATE/gone" "$STATE/shell"
 
-# 20. A stale name is reclaimed only when its old pane is at the shell.
-reset; touch "$STATE/stale"
-rc=0; out=$("$CREW" team pair T7 "reclaim name" 2>&1) || rc=$?
-(( rc == 0 )) && pass "stale name: launch succeeds" || flunk "stale name: rc=$rc"
-in_log "stale name: cleared" "agent rename $S-t7-driver --clear"
-rm -f "$STATE/stale" "$STATE/shell"
-reset; touch "$STATE/stale" "$STATE/live"
-cp "$HOME/.herdr/crew/$S/$S-t7-driver.meta" "$TMP/live.meta"
-cp "$HOME/.herdr/crew/$S/$S-t7-driver.brief" "$TMP/live.brief"
-rc=0; out=$("$CREW" team pair T7 "keep live name" 2>&1) || rc=$?
-(( rc != 0 )) && pass "live name: refused" || flunk "live name: replaced"
-[[ $(cnt 'agent rename') == 0 ]] && pass "live name: not cleared" || flunk "live name: cleared"
-cmp -s "$TMP/live.meta" "$HOME/.herdr/crew/$S/$S-t7-driver.meta" && pass "live name: restart meta preserved" || flunk "live name: restart meta corrupted"
-cmp -s "$TMP/live.brief" "$HOME/.herdr/crew/$S/$S-t7-driver.brief" && pass "live name: brief preserved" || flunk "live name: brief overwritten"
-rm -f "$STATE/stale" "$STATE/live"
+# 20. App terminals have no legacy name registry to clear.
+! grep -qF 'clear_stale_name' "$ROOT/bin/crew" && pass "app terminals: no name registry cleanup" || flunk "app terminals: legacy name cleanup remains"
 
 # 21. Existing branches are attached; retained worktrees are reused.
 reset
@@ -355,32 +375,29 @@ out=$(BRANCH_EXISTS=1 "$CREW" team pair T7 "reuse worktree" 2>&1)
 [[ $(cnt 'worktree add') == 0 ]] && pass "pair worktree: retained" || flunk "pair worktree: added again"
 rmdir "$HOME/.herdr/worktrees/$S/T7-pair"
 
-# 22. Visible pasted input gets Enter; ambiguous input is never resent.
-reset; touch "$STATE/paste"; rm -f "$STATE/entered"
+# 22. Visible pasted input gets Enter; first app briefs wait for readiness handling in Task 3.
+reset; echo idle >"$STATE/$S-t7-navigator"; touch "$STATE/paste"; rm -f "$STATE/entered"
 out=$("$CREW" say "$S-t7-navigator" "paste me" 2>&1)
 in_log "paste: extra Enter" "agent send-keys $S-t7-navigator enter"
 [[ $(cnt 'agent prompt') == 1 ]] && pass "paste: submitted once" || flunk "paste: duplicate prompt"
 rm -f "$STATE/paste" "$STATE/entered"
-reset; echo unknown >"$STATE/$S-t7-navigator"
-touch "$STATE/ambiguous"
-out=$("$CREW" team pair T7 "ambiguous paste" 2>&1)
-[[ $(cnt 'agent prompt') == 2 ]] && pass "ambiguous paste: each brief sent once" || flunk "ambiguous paste: brief resent"
-rm -f "$STATE/ambiguous"
-reset; touch "$STATE/quick-done"
-out=$("$CREW" team pair T7 "fast completion" 2>&1)
-[[ $(cnt 'agent prompt') == 2 && "$out" != *"did not start working"* ]] && pass "quick completion: accepted once" || flunk "quick completion: retried or warned"
-rm -f "$STATE/quick-done"
+reset; touch "$STATE/ambiguous" "$STATE/quick-done"
+out=$("$CREW" team pair T7 "brief awaits readiness" 2>&1)
+[[ $(cnt 'agent prompt') == 0 ]] && pass "first app briefs wait for readiness handling" || flunk "first app brief used legacy Herdr"
+rm -f "$STATE/ambiguous" "$STATE/quick-done"
 
 # 23. SessionStart restores exports in a fresh Claude shell environment.
 reset
 out=$("$CREW" team pair T7 "resume env" 2>&1)
+app_settings >"$STATE/settings.json"
 hook_cmd=$(jq -r '.hooks.SessionStart[0].hooks[0].command // empty' "$STATE/settings.json")
 ENVFILE="$TMP/resumed.env"; : >"$ENVFILE"
 if [[ -n "$hook_cmd" ]]; then
   env -u CREW_SLUG -u CREW_REPO -u CREW_AGENT -u CREW_TASK -u CREW_MANAGER -u CREW_WS CLAUDE_ENV_FILE="$ENVFILE" bash -c "$hook_cmd"
 fi
 restored=$(bash -c 'source "$1"; printf "%s|%s|%s|%s|%s|%s" "$CREW_SLUG" "$CREW_REPO" "$CREW_AGENT" "$CREW_TASK" "$CREW_MANAGER" "$CREW_WS"' _ "$ENVFILE")
-[[ "$restored" == "$S|$REPO|$S-t7-navigator|T7|$S-manager|w1" ]] && pass "resume: crew exports restored" || flunk "resume: exports missing ($restored)"
+space_id=$(jq -r '.id' "$STATE/space")
+[[ "$restored" == "$S|$REPO|$S-t7-navigator|T7|$S-manager|$space_id" ]] && pass "resume: crew exports restored" || flunk "resume: exports missing ($restored)"
 
 # 24. UI domain attaches to existing jobs and reaches both generated briefs.
 reset
@@ -405,12 +422,13 @@ for spec in investigator inspector@investigator; do
   (( rc == 0 )) && pass "investigate $spec: launches" || flunk "investigate $spec: rc=$rc ($out)"
   if (( rc == 0 )); then
     in_out "investigate $spec: task created" "created task T7" "$out"
-    in_log "investigate $spec: inspector starts" "--agent crew-inspector -n $S-t7-investigator"
-    in_log "investigate $spec: repo cwd" "tab create --workspace w1 --cwd $REPO --label T7 investigate"
-    [[ $(cnt 'agent start') == 1 ]] && pass "investigate $spec: one worker" || flunk "investigate $spec: extra worker"
+    in_out "investigate $spec: inspector starts" "--agent crew-inspector -n $S-t7-investigator" "$(app_argv_text)"
+    json_log --arg folder "$REPO" -e 'any(.[]; .[0:3] == ["herdr-app","do","tab.new"] and (index("--folder") as $i | .[$i+1] == $folder))' >/dev/null \
+      && pass "investigate $spec: repo cwd" || flunk "investigate $spec: wrong app folder"
+    [[ $(app_agent_count) == 1 ]] && pass "investigate $spec: one worker" || flunk "investigate $spec: extra worker"
     [[ $(cnt 'worktree add') == 0 && $(cnt 'checkout') == 0 ]] && pass "investigate $spec: no worktree or checkout" || flunk "investigate $spec: git mutation"
     investigation_brief=$(brief_of "$S-t7-investigator")
-    jq -e '.["crew-inspector"].prompt | contains("Investigation job.")' "$STATE/$S-t7-investigator.agents.json" >/dev/null && pass "investigate $spec: persona loaded" || flunk "investigate $spec: persona missing"
+    jq -e '.["crew-inspector"].prompt | contains("Investigation job.")' <<<"$(app_agents_json)" >/dev/null && pass "investigate $spec: persona loaded" || flunk "investigate $spec: persona missing"
     in_out "investigate $spec: batch preserved" "$questions" "$investigation_brief"
     panes_ok "investigate $spec: pane environment"
   fi
@@ -421,8 +439,8 @@ rc=0; out=$("$CREW" team investigate T7 --persona investigator=nestjs-expert "$q
 if (( rc == 0 )); then
   investigation_brief=$(brief_of "$S-t7-investigator")
   in_out "investigate domain: NestJS loaded" "Persona (nestjs-expert):" "$investigation_brief"
-  in_log "investigate domain: inspector retained" "--agent crew-inspector -n $S-t7-investigator"
-  [[ $(cnt 'agent start') == 1 && $(cnt 'worktree add') == 0 ]] && pass "investigate team: one worker, no worktree" || flunk "investigate team: extra worker or worktree"
+  in_out "investigate domain: inspector retained" "--agent crew-inspector -n $S-t7-investigator" "$(app_argv_text)"
+  [[ $(app_agent_count) == 1 && $(cnt 'worktree add') == 0 ]] && pass "investigate team: one worker, no worktree" || flunk "investigate team: extra worker or worktree"
 fi
 reject "investigate: wrong rank refused before mutations" "is a inspector job" "check login" launch member@investigator -
 
@@ -434,11 +452,11 @@ for spec in planner member@planner; do
   (( rc == 0 )) && pass "plan $spec: launches" || flunk "plan $spec: rc=$rc ($out)"
   if (( rc == 0 )); then
     in_log "plan $spec: planning branch" "worktree add -b crew/T7-plan"
-    in_log "plan $spec: member rank" "--agent crew-member -n $S-t7-planner"
-    [[ $(cnt 'agent start') == 1 && $(cnt 'pane split') == 0 ]] && pass "plan $spec: one worker" || flunk "plan $spec: extra worker"
+    in_out "plan $spec: member rank" "--agent crew-member -n $S-t7-planner" "$(app_argv_text)"
+    [[ $(app_agent_count) == 1 && $(cnt 'pane.split') == 0 ]] && pass "plan $spec: one worker" || flunk "plan $spec: extra worker"
     plan_brief=$(brief_of "$S-t7-planner")
     in_out "plan $spec: original request" "$plan_request" "$plan_brief"
-    plan_guidance=$(jq -r '.["crew-member"].prompt' "$STATE/$S-t7-planner.agents.json")
+    plan_guidance=$(jq -r '.["crew-member"].prompt' <<<"$(app_agents_json)")
     in_out "plan $spec: documentation scope" "Planning artifacts only" "$plan_guidance"
     in_out "plan $spec: contract pointer" "docs/planning/visual-plan-contract.md" "$plan_guidance"
     in_out "plan $spec: reports version" "plan ready:" "$plan_guidance"
@@ -532,8 +550,18 @@ reset
 out=$(echo "dry run flag" | "$CREW" --dry-run launch driver - 2>&1)
 in_out "dry-run flag: prints the tsk call" "+ tsk add --title=dry run flag" "$out"
 in_out "dry-run flag: reports the task" "created task T1" "$out"
-in_out "dry-run flag: prints the agent start" "+ herdr agent start $S-t1-driver --pane" "$out"
+in_out "dry-run flag: prints app tab creation" "+ herdr-app do tab.new" "$out"
 [[ $(cnt 'agent start') == 0 ]] && pass "dry-run flag: starts no agent" || flunk "dry-run flag: started an agent"
+
+# app topology dry-run prints planned argv and never writes agent metadata
+mkdir -p "$TMP/dry-home" "$TMP/dry-state"
+reset
+out=$(echo "dry topology" | env HOME="$TMP/dry-home" STATE="$TMP/dry-state" LOG="$TMP/dry-log" CREW_SLUG=dry-run CREW_WS=w1 CREW_DRY_RUN=1 "$CREW" launch lead - 2>&1)
+in_out "dry-run app: plans space creation" "+ herdr-app do space.new" "$out"
+in_out "dry-run app: plans the manager split" "herdr-app do pane.split --direction right" "$out"
+in_out "dry-run app: plans the tsk split" "herdr-app do pane.split --direction down" "$out"
+in_out "dry-run app: argv carries crew environment" 'CREW_WS=sp-dry' "$out"
+[[ ! -e "$TMP/dry-home/.herdr/crew/dry-run/dry-run-lead.meta" ]] && pass "dry-run app: writes no agent meta" || flunk "dry-run app: wrote agent meta"
 
 # completions
 rc=0; out=$("$CREW" completion bash 2>&1) || rc=$?
