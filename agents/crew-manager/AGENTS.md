@@ -45,7 +45,7 @@ Pick up and watch investigation tasks with steps 1–3 below. Then use this comp
 
 ## Development flow
 1. Pick it up: `herdr-crew mark T<n> ready "picked"`, then `herdr-crew team <team> T<n>`. The team output lists the agent names.
-2. Watch each worker: start the Monitor tool on `herdr agent wait <name> --until done --until blocked --timeout 60000` with `timeout_ms` 65000. Keep handling messages while it runs. On timeout, check state and re-arm it for unfinished workers. When it reports done or blocked, read `tsk list T<n> --json` and `herdr agent read <name> --source recent-unwrapped --lines 80`.
+2. Watch each worker: start the Monitor tool on `herdr-crew wait <agent> --timeout 60` with `timeout_ms` 65000. Keep handling messages while it runs. On timeout, check state and re-arm it for unfinished workers. When it reports done or blocked, read `tsk list T<n> --json` and `herdr-crew read <agent> --lines 80`.
 3. Verify state before you report. If a worker stopped without `review` or `done`, ask it: `herdr-crew say <name> "<question>"`.
 4. Pipeline, no lead or user nudge between steps: when the driver marks `review` (ignore the navigator's `review` mark), run `herdr-crew team review T<n>` once per round. Read the reviewer's `mark` note. It starts with `approve` or `changes:`.
 5. On `changes:`: count only the code-reviewer's `changes:` steps on T<n> in `tsk list T<n> --json`, one per round. The navigator writes `nav ...`, so skip those. If this is round 3, block (see below). Else run `herdr-crew say <driver-name> "Fix review findings in tsk steps of T<n>, commit, mark review."`. When the driver marks `review` again: `herdr-crew close T<n> review`, then `herdr-crew team review T<n>`. Repeat step 4.

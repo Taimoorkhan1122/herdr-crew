@@ -111,9 +111,18 @@ slot_list() { local d=${2:-pragmatic-senior}; echo "${1:+$1 }$d"; }
 pmap_for() { local e; for e in $pmap; do if [[ "${e%%=*}" == "$1" ]]; then echo "${e#*=}" | tr '+' ' '; return 0; fi; done; }
 # branch_exists BRANCH: local branch present in the repo
 branch_exists() { git -C "$REPO" rev-parse --verify -q "refs/heads/$1" >/dev/null 2>&1; }
-# status_of NAME: agent_status from herdr agent get (idle, working, blocked, done, unknown); empty if no such agent
-status_of() { herdr agent get "$1" 2>/dev/null | jq -r '.result.agent.agent_status // empty' 2>/dev/null || true; }
-terminal_of() { sed -n 's/^terminal=//p' "$SDIR/$1.meta" 2>/dev/null | head -1; }
+terminal_of() {
+  local meta="$SDIR/$1.meta" terminal
+  [[ "$1" =~ ^[a-zA-Z0-9_-]+$ && -f "$meta" ]] || return 1
+  terminal=$(sed -n 's/^terminal=//p' "$meta" | head -1)
+  [[ -n "$terminal" ]] || return 1
+  printf '%s\n' "$terminal"
+}
+terminal_status() {
+  local name=$1 snapshot=$2 terminal
+  terminal=$(terminal_of "$name") || return 0
+  jq -r --arg address "$terminal" '.terminals[]? | select(.address == $address) | .status.state // empty' <<<"$snapshot" 2>/dev/null | head -1 || true
+}
 
 # A saved Claude SessionStart hook repopulates Bash tool env after resume.
 crew_env_hook() {
@@ -283,6 +292,7 @@ wait_ready() {
 # submit_term TERM NAME TEXT: send once, then recover a swallowed Enter only for visible pasted text.
 submit_term() {
   local terminal=$1 name=$2 text=$3 before_turn info status turn screen first_line rc i
+  SUBMIT_BLOCKED=0
   if [[ -n "${CREW_DRY_RUN:-}" ]]; then mut hc send "$terminal" "$text" >/dev/null; return 0; fi
   info=$(hc get "$terminal" --json 2>/dev/null || true)
   before_turn=$(jq -r '.turn // empty' <<<"$info" 2>/dev/null || true)
@@ -291,7 +301,7 @@ submit_term() {
   else
     rc=$?
     case "$rc" in
-      9) crew_warn "$name is blocked; needs a person"; return 1 ;;
+      9) SUBMIT_BLOCKED=1; crew_warn "$name is blocked; needs a person"; return 1 ;;
       3) die "$name terminal $terminal is gone; relaunch the team" ;;
       *) die "cannot send first brief to $name (hc send exit $rc)" ;;
     esac
@@ -323,8 +333,7 @@ submit_term() {
 # submit NAME TEXT: keep the say caller interface while sending through its saved terminal.
 submit() {
   local terminal
-  terminal=$(terminal_of "$1")
-  [[ -n "$terminal" ]] || die "no saved terminal for $1 (start it with herdr-crew first)"
+  terminal=$(terminal_of "$1") || die "no saved terminal for $1 (start it with herdr-crew first)"
   submit_term "$terminal" "$1" "$2"
 }
 
@@ -421,7 +430,6 @@ cmd_launch() {
   local existing_term
   if [[ "$RANK" == lead ]] && existing_term=$(terminal_of "$SLUG-lead") && [[ -n "$existing_term" ]] && hc get "$existing_term" --json >/dev/null 2>&1; then
     cmd_say "$SLUG-lead" "$instr"
-    crew_out "$SLUG-lead already running, sent instructions to it"
     return
   fi
 
@@ -563,28 +571,60 @@ cmd_team() {
   crew_out "team $team for $T in tab '$T $team' (agents: ${names[*]})"
 }
 
-# cmd_say AGENT MSG: prompt it when idle or done. Otherwise wait at most 20s, then queue the message as a step
-# on its task. Never blocks for long, never exits non-zero because the recipient is busy.
-cmd_say() {
-  local to=$1 msg=$2 state task=""
-  state=$(status_of "$to"); state=${state:-unknown}
-  if [[ "$state" == idle || "$state" == done ]] || herdr agent wait "$to" --until idle --until done --timeout 20000 >/dev/null 2>&1; then
-    submit "$to" "[from $ME] $msg"
-    return 0
-  fi
-  # Recipient's task: the T# in its name (<slug>-t<n>-<job>), else none
-  if [[ "$to" =~ ^.*-t([0-9]+)- ]]; then task="T${BASH_REMATCH[1]}"; fi
+# cmd_say AGENT MSG: send only to idle/done terminals; otherwise queue once on its task.
+# Never exits non-zero because the recipient is busy.
+queue_say() {
+  local to=$1 msg=$2 state=$3 task=$4
   if [[ -n "$task" ]]; then
     mut tsk steps "$task" add "[msg from $ME to $to] $msg"
-    crew_out "$to is $state, message queued on $task (it reads it from the task steps)"
+    crew_out "$to is ${state:-unknown}, message queued on $task (it reads it from the task steps)"
   else
-    crew_warn "$to is $state and has no task; message NOT delivered, send it again later"
+    crew_warn "$to is ${state:-unknown} and has no task; message NOT delivered, send it again later"
   fi
+}
+
+cmd_say() {
+  local to=$1 msg=$2 state="" task="" terminal="" info=""
+  if [[ "$to" =~ ^[a-zA-Z0-9_-]+$ && -f "$SDIR/$to.meta" ]]; then task=$(sed -n 's/^task=//p' "$SDIR/$to.meta" | head -1); fi
+  terminal=$(terminal_of "$to" 2>/dev/null || true)
+  if [[ -n "$terminal" ]]; then
+    info=$(hc get "$terminal" --json 2>/dev/null || true)
+    state=$(jq -r '.status.state // empty' <<<"$info" 2>/dev/null || true)
+    if [[ "$state" == working ]]; then
+      info=$(hc wait "$terminal" --timeout 20 2>/dev/null || true)
+      state=$(jq -r '.status.state // (.status | strings) // empty' <<<"$info" 2>/dev/null || true)
+    fi
+    if [[ "$state" == idle || "$state" == done ]]; then
+      if submit "$to" "[from $ME] $msg"; then
+        crew_out "sent to $to"
+      elif (( SUBMIT_BLOCKED )); then
+        queue_say "$to" "$msg" blocked "$task"
+      else
+        crew_warn "$to message delivery was not confirmed; inspect it before retrying"
+      fi
+      return 0
+    fi
+  fi
+  queue_say "$to" "${msg:-}" "${state:-unknown}" "$task"
   return 0
 }
 
+cmd_read() {
+  local name=${1:?usage: read <agent> [--lines N]} terminal
+  shift
+  terminal=$(terminal_of "$name") || die "no saved state for $name (start it with herdr-crew first)"
+  hc read "$terminal" "$@"
+}
+
+cmd_wait() {
+  local name=${1:?usage: wait <agent> [--timeout S]} terminal
+  shift
+  terminal=$(terminal_of "$name") || die "no saved state for $name (start it with herdr-crew first)"
+  hc wait "$terminal" "$@"
+}
+
 cmd_mark() {
-  local T=$1 st=$2 note=$3 result tmp coordinator completion_hook
+  local T=$1 st=$2 note=$3 result tmp coordinator completion_hook tab label
   [[ "$T" =~ ^T[0-9]+$ && "$ME" =~ ^[a-zA-Z0-9_-]+$ ]] || die "invalid task or agent identity"
   case "$st" in ready|started|blocked|review|done) ;; *) die "invalid task status '$st'" ;; esac
   [[ -n "$note" ]] || die "mark requires a non-empty note"
@@ -600,7 +640,13 @@ cmd_mark() {
   mv -f "$tmp" "$result" || { rm -f "$tmp"; die "cannot save task result"; }
   mut tsk status "$T" "$st"
   mut tsk steps "$T" add "$note"
-  mut herdr pane report-metadata "${HERDR_PANE_ID:-none}" --source crew --title "$T $ME: $note"
+  tab=$(sed -n 's/^tab=//p' "$SDIR/$ME.meta" 2>/dev/null | head -1)
+  label=$(sed -n 's/^label=//p' "$SDIR/$ME.meta" 2>/dev/null | head -1)
+  if [[ -n "$tab" && -n "$label" ]]; then
+    mut herdr-app do tab.rename --id "$tab" --name "$label · $ME: $note"
+  else
+    crew_warn "no saved tab for $ME; task update saved without a tab rename"
+  fi
   case "$st" in blocked|review|done)
     coordinator=$(sed -n 's/^coordinator=//p' "$SDIR/$ME.meta" 2>/dev/null | head -1)
     completion_hook=$(sed -n 's/^completion_hook=//p' "$SDIR/$ME.meta" 2>/dev/null | head -1)
@@ -611,21 +657,21 @@ cmd_mark() {
   esac
 }
 
-# show_agent NAME: one line "name<TAB>state" when the agent exists
-show_agent() { local st; st=$(status_of "$1"); if [[ -n "$st" ]]; then printf '%s\t%s\n' "$1" "$st"; fi; }
+# show_agent NAME SNAPSHOT: one line "name<TAB>state" when the saved terminal has a status
+show_agent() { local st; st=$(terminal_status "$1" "$2"); if [[ -n "$st" ]]; then printf '%s\t%s\n' "$1" "$st"; fi; }
 
 cmd_status() {
-  local rows n st title job name
+  local rows snapshot n st title job name
   if [[ "${1:-}" == --json ]]; then tsk list -p "$REPO" --json; return 0; fi
-  # herdr agent list has no names, so probe the names the crew would use
   rows=$(tsk list -p "$REPO" --json)
+  if snapshot=$(hc ls --json 2>/dev/null); then :; else snapshot='{"terminals":[]}'; fi
   while IFS=$'\t' read -r n st title; do
     [[ -n "$n" ]] || continue
     printf 'T%s\t%s\t%s\n' "$n" "$st" "$title"
   done < <(jq -r '.[] | [(.number|tostring),(.status // "?"),(.title // "")] | @tsv' <<<"$rows" 2>/dev/null || true)
-  for name in "$SLUG-lead" "$SLUG-manager"; do show_agent "$name"; done
+  for name in "$SLUG-lead" "$SLUG-manager"; do show_agent "$name" "$snapshot"; done
   for n in $(jq -r '.[].number // empty' <<<"$rows"); do
-    for job in $(all_jobs); do show_agent "$(agent_name "T$n" "$job")"; done
+    for job in $(all_jobs); do show_agent "$(agent_name "T$n" "$job")" "$snapshot"; done
   done
 }
 
@@ -658,7 +704,7 @@ field_of() { awk -F'\t' -v k="$1" -v c="$2" '$1==k{print $c; exit}' <<<"$3"; }
 # The first poll only sets the baseline, except tasks already blocked. CREW_WATCH_SECS sets the interval.
 # CREW_WATCH_ONCE=1 stops after two polls (tests).
 cmd_watch() {
-  local secs=${CREW_WATCH_SECS:-20} polls=0 first=1 raw done_raw key st title old name new job names n f
+  local secs=${CREW_WATCH_SECS:-20} polls=0 first=1 raw done_raw snapshot key st title old name new job names n f
   local tasks="" agents="" files="" p_tasks="" p_agents="" p_files=""
   trap 'printf "\n"; crew_out "watch stopped"; exit 130' INT
   while :; do
@@ -672,11 +718,13 @@ cmd_watch() {
         for job in $(all_jobs); do names="$names $(agent_name "$key" "$job")"; done
       done
     fi
-    agents=""
-    for name in $names; do
-      st=$(status_of "$name")
-      [[ -z "$st" ]] || agents="$agents$name"$'\t'"$st"$'\n'
-    done
+    if snapshot=$(hc ls --json 2>/dev/null); then
+      agents=""
+      for name in $names; do
+        st=$(terminal_status "$name" "$snapshot")
+        [[ -z "$st" ]] || agents="$agents$name"$'\t'"$st"$'\n'
+      done
+    else agents=$p_agents; fi
     # handoff files: handoff-<agent>.md only; renamed copies (handoff-<agent>.<epoch>.md) have a dot
     files=$(ls "$SDIR" 2>/dev/null | sed -n 's/^handoff-\(.*\)\.md$/\1/p' | grep -v '\.' || true)
 
@@ -731,11 +779,12 @@ cmd_handoff() {
 # The brief gets a resume line when a handoff exists; keep that path readable.
 restart_one() {
   local name=$1 rank job pane task i ready="" pi handoff brief selection definition context_hook completion_hook space tab terminal label arg_index
-  [[ -f "$SDIR/$name.meta" && -f "$SDIR/$name.brief" ]] || die "no saved state for $name (start it with herdr-crew first)"
+  terminal=$(terminal_of "$name") || die "no saved state for $name (start it with herdr-crew first)"
+  [[ -f "$SDIR/$name.brief" ]] || die "no saved state for $name (start it with herdr-crew first)"
   rank=$(sed -n 's/^rank=//p' "$SDIR/$name.meta"); job=$(sed -n 's/^job=//p' "$SDIR/$name.meta")
   pane=$(sed -n 's/^pane=//p' "$SDIR/$name.meta"); task=$(sed -n 's/^task=//p' "$SDIR/$name.meta")
   space=$(sed -n 's/^space=//p' "$SDIR/$name.meta"); tab=$(sed -n 's/^tab=//p' "$SDIR/$name.meta")
-  terminal=$(sed -n 's/^terminal=//p' "$SDIR/$name.meta"); label=$(sed -n 's/^label=//p' "$SDIR/$name.meta")
+  label=$(sed -n 's/^label=//p' "$SDIR/$name.meta")
   selection=$(sed -n 's/^selection=//p' "$SDIR/$name.meta")
   if [[ -n "$selection" ]]; then
     # The pane retains its original environment, including the OpenCode session policy.
@@ -834,6 +883,8 @@ case "$sub" in
   launch)  cmd_launch "$@" ;;
   team)    cmd_team "$@" ;;
   say)     cmd_say "$@" ;;
+  read)    cmd_read "$@" ;;
+  wait)    cmd_wait "$@" ;;
   mark)    cmd_mark "$@" ;;
   status)  cmd_status "$@" ;;
   close)   cmd_close "$@" ;;

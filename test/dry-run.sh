@@ -65,11 +65,14 @@ case "$1" in
           if [[ "$(cat "$STATE/tsk-last" 2>/dev/null)" == done ]]; then echo '[{"number":7,"status":"done","title":"fix the login bug","notes":""}]'; else echo '[]'; fi
         elif [[ " $* " == *" -p "* ]]; then
           # board read: T7 status comes from $STATE/tsk-seq (one status per poll), T8 stays ready. Done T7 is left out.
-          st=ready
-          if [[ -f "$STATE/tsk-seq" ]]; then st=$(head -1 "$STATE/tsk-seq"); tail -n +2 "$STATE/tsk-seq" >"$STATE/tsk-seq.n"; mv -f "$STATE/tsk-seq.n" "$STATE/tsk-seq"; fi
-          echo "$st" >"$STATE/tsk-last"
-          if [[ "$st" == done ]]; then echo '[{"number":8,"status":"ready","title":"other","notes":""}]'
-          else echo "[{\"number\":7,\"status\":\"$st\",\"title\":\"fix the login bug\",\"notes\":\"\"},{\"number\":8,\"status\":\"ready\",\"title\":\"other\",\"notes\":\"\"}]"; fi
+          if [[ -f "$STATE/tsk-empty" ]]; then echo '[]'
+          else
+            st=ready
+            if [[ -f "$STATE/tsk-seq" ]]; then st=$(head -1 "$STATE/tsk-seq"); tail -n +2 "$STATE/tsk-seq" >"$STATE/tsk-seq.n"; mv -f "$STATE/tsk-seq.n" "$STATE/tsk-seq"; fi
+            echo "$st" >"$STATE/tsk-last"
+            if [[ "$st" == done ]]; then echo '[{"number":8,"status":"ready","title":"other","notes":""}]'
+            else echo "[{\"number\":7,\"status\":\"$st\",\"title\":\"fix the login bug\",\"notes\":\"\"},{\"number\":8,\"status\":\"ready\",\"title\":\"other\",\"notes\":\"\"}]"; fi
+          fi
         else echo '[{"number":7,"notes":""}]'; fi ;;
 esac
 SH
@@ -189,34 +192,98 @@ reset
 out=$(echo "-fix parser" | "$CREW" launch driver - 2>&1)
 in_log "dash text: = form keeps the title" "tsk add --title=-fix parser --notes=-fix parser -p $REPO --json"
 
-# 5. say: idle agent gets a prompt from the real sender; busy agent gets a queued step, exit 0
-reset; echo idle >"$STATE/$S-t7-driver"
-CREW_AGENT=$S-t7-navigator "$CREW" say "$S-t7-driver" "hello there" >/dev/null
+# 5. say sends once when idle; waits once then queues when still working or blocked.
 say_term=$(sed -n 's/^terminal=//p' "$HOME/.herdr/crew/$S/$S-t7-driver.meta")
-hc_log -e --arg terminal "$say_term" --arg message "[from $S-t7-navigator] hello there" 'any(.[]; . == ["hc","send",$terminal,$message])' >/dev/null \
-  && pass "say idle: sends through the saved terminal from the real sender" || flunk "say idle: message was not sent"
-echo working >"$STATE/$S-t7-driver"; reset
-out=$(CREW_AGENT=$S-t7-navigator "$CREW" say "$S-t7-driver" "hold on" 2>&1)
-in_out "say busy: queued" "queued on T7" "$out"
-in_log "say busy: step on the recipient's task" "tsk steps T7 add [msg from $S-t7-navigator to $S-t7-driver] hold on"
-[[ $(cnt 'agent prompt') == 0 ]] && pass "say busy: no prompt sent" || flunk "say busy: prompted a busy agent"
+set_say_status() { jq --arg status "$2" '.status = $status | .sendExit = 0' "$STATE/term.$1" >"$STATE/term.$1.tmp" && mv "$STATE/term.$1.tmp" "$STATE/term.$1"; }
+reset; set_say_status "$say_term" idle
+out=$(CREW_AGENT=$S-t7-navigator "$CREW" say "$S-t7-driver" "hello there" 2>&1)
+hc_log -e --arg terminal "$say_term" --arg message "[from $S-t7-navigator] hello there" '[.[] | select(. == ["hc","send",$terminal,$message])] | length == 1' >/dev/null \
+  && pass "say idle: sends exactly once through saved terminal" || flunk "say idle: message send count or address is wrong"
+in_out "say idle: reports delivery" "sent to $S-t7-driver" "$out"
+reset; set_say_status "$say_term" working
+rc=0; out=$(CREW_AGENT=$S-t7-navigator "$CREW" say "$S-t7-driver" "hold on" 2>&1) || rc=$?
+(( rc == 0 )) && in_out "say working: exits successfully after wait" "queued on T7" "$out" || flunk "say working: command failed"
+hc_log -e --arg terminal "$say_term" '[.[] | select(. == ["hc","wait",$terminal,"--timeout","20"])] | length == 1' >/dev/null \
+  && pass "say working: waits once before queue" || flunk "say working: did not wait exactly once"
+in_log "say working: queues one task step" "tsk steps T7 add [msg from $S-t7-navigator to $S-t7-driver] hold on"
+[[ $(cnt '"send"') == 0 ]] && pass "say working: no hc send after wait timeout" || flunk "say working: sent to busy agent"
+reset; set_say_status "$say_term" blocked
+out=$(CREW_AGENT=$S-t7-navigator "$CREW" say "$S-t7-driver" "permission needed" 2>&1)
+in_out "say blocked: queues task step" "queued on T7" "$out"
+[[ $(cnt '"send"') == 0 ]] && pass "say blocked: never calls hc send" || flunk "say blocked: attempted send"
+[[ $(grep -cF 'tsk steps T7 add [msg from' "$LOG") == 1 ]] && pass "say blocked: queues once" || flunk "say blocked: queued more than once"
+lead_term=$(sed -n 's/^terminal=//p' "$HOME/.herdr/crew/$S/$S-lead.meta")
+reset; set_say_status "$lead_term" working
+out=$(CREW_AGENT=$S-t7-navigator "$CREW" say "$S-lead" "no task message" 2>&1)
+in_out "say no-task: warns message not delivered" "message NOT delivered" "$out"
+[[ $(cnt '"send"') == 0 && $(cnt 'tsk steps') == 0 ]] && pass "say no-task: sends and queues nothing" || flunk "say no-task: unexpected delivery or queue"
 
 # 6. mark uses the real CREW_AGENT
 reset
 CREW_AGENT=$S-t7-driver "$CREW" mark T7 review "tests pass" >/dev/null
 in_log "mark: status change" "tsk status T7 review"
 in_log "mark: note as a step" "tsk steps T7 add tests pass"
-in_log "mark: real agent name in the pane title" "T7 $S-t7-driver: tests pass"
+mark_tab=$(sed -n 's/^tab=//p' "$HOME/.herdr/crew/$S/$S-t7-driver.meta")
+json_log -e --arg tab "$mark_tab" --arg name "T7 pair · $S-t7-driver: tests pass" 'any(.[]; . == ["herdr-app","do","tab.rename","--id",$tab,"--name",$name])' >/dev/null \
+  && pass "mark: renames tab and keeps T7 pair prefix" || flunk "mark: wrong tab rename or label prefix"
 
-# 7. status: names probed per task, state from herdr agent get
+# 7. status: task rows stay first; agent statuses map saved terminals from one hc ls.
+set_say_status "$lead_term" done
+manager_term=$(sed -n 's/^terminal=//p' "$HOME/.herdr/crew/$S/$S-manager.meta")
+set_say_status "$manager_term" idle
+set_say_status "$say_term" working
+reset; printf '%s\n' review >"$STATE/tsk-seq"
 out=$("$CREW" status 2>&1)
-in_out "status: driver name and state" "$S-t7-driver"$'\t'"working" "$out"
+in_out "status: task row remains" "T7"$'\t'"review"$'\t'"fix the login bug" "$out"
+in_out "status: lead state from saved terminal" "$S-lead"$'\t'"done" "$out"
+in_out "status: manager state from saved terminal" "$S-manager"$'\t'"idle" "$out"
+in_out "status: driver state from saved terminal" "$S-t7-driver"$'\t'"working" "$out"
+hc_log -e '[.[] | select(. == ["hc","ls","--json"])] | length == 1' >/dev/null \
+  && pass "status: reads one hc ls snapshot" || flunk "status: did not use exactly one hc ls"
+[[ $(cnt 'agent get') == 0 ]] && pass "status: no legacy agent status probes" || flunk "status: used legacy agent status"
 
-# 8. lead re-run: probes its saved terminal and does not create another app tab
-reset
+# 7a. read and wait resolve names through saved metadata and pass options through.
+printf 'recent screen output\n' >"$STATE/screen.$say_term"
+reset; rc=0; out=$("$CREW" read "$S-t7-driver" --lines 12 2>&1) || rc=$?
+(( rc == 0 )) || flunk "read: rc=$rc ($out)"
+in_out "read: prints terminal output" "recent screen output" "$out"
+hc_log -e --arg terminal "$say_term" '[.[] | select(. == ["hc","read",$terminal,"--lines","12"])] | length == 1' >/dev/null \
+  && pass "read: passes lines option to hc" || flunk "read: hc arguments are wrong"
+reset; rc=0; out=$("$CREW" wait "$S-t7-driver" --timeout 4 2>&1) || rc=$?
+(( rc == 0 )) || flunk "wait: rc=$rc ($out)"
+hc_log -e --arg terminal "$say_term" '[.[] | select(. == ["hc","wait",$terminal,"--timeout","4"])] | length == 1' >/dev/null \
+  && pass "wait: passes timeout option to hc" || flunk "wait: hc arguments are wrong"
+for command in read wait; do
+  rc=0; out=$("$CREW" "$command" missing-agent 2>&1) || rc=$?
+  (( rc != 0 )) && in_out "$command: missing saved state fails clearly" "start it with herdr-crew first" "$out" || flunk "$command: missing state rc=$rc"
+done
+
+# 7b. watch emits one terminal transition and one gone event from two snapshots.
+manager_term=$(sed -n 's/^terminal=//p' "$HOME/.herdr/crew/$S/$S-manager.meta")
+set_say_status "$lead_term" working; set_say_status "$manager_term" working
+cp "$STATE/term.$manager_term" "$TMP/manager.term.saved"
+printf '%s\tblocked\n%s\tgone\n' "$lead_term" "$manager_term" >"$STATE/watch-mutations"
+touch "$STATE/tsk-empty"
+reset; out=$(CREW_WATCH_ONCE=1 CREW_WATCH_SECS=0 "$CREW" watch 2>&1)
+rm -f "$STATE/tsk-empty"
+cp "$TMP/manager.term.saved" "$STATE/term.$manager_term"
+in_out "watch: reports blocked transition" "$S-lead blocked" "$out"
+in_out "watch: reports removed terminal once" "$S-manager gone" "$out"
+[[ $(printf '%s\n' "$out" | grep -c .) == 2 ]] && pass "watch: one transition and one gone line" || flunk "watch: unexpected event lines ($out)"
+[[ $(hc_log -e '[.[] | select(.[0:2] == ["hc","ls"])] | length') == 2 ]] && pass "watch: one hc ls snapshot per poll" || flunk "watch: wrong hc ls call count"
+
+# 8. lead re-run: delivers through hc and does not claim success before send.
+reset; set_say_status "$lead_term" idle
 out=$(echo "more work" | "$CREW" launch lead - 2>&1)
-in_out "lead re-run: sends to the running lead" "already running" "$out"
+hc_log -e --arg terminal "$lead_term" --arg message "[from user] more work" '[.[] | select(. == ["hc","send",$terminal,$message])] | length == 1' >/dev/null \
+  && pass "lead re-run: sends through hc exactly once" || flunk "lead re-run: message was not delivered through hc"
+in_out "lead re-run: confirms delivery only after send" "sent to $S-lead" "$out"
 [[ $(cnt 'space.new') == 0 && $(cnt 'tab.new') == 0 ]] && pass "lead re-run: no app tab created" || flunk "lead re-run: created an app tab"
+reset; jq '.status = "idle" | .sendExit = 9' "$STATE/term.$lead_term" >"$STATE/term.$lead_term.tmp" && mv "$STATE/term.$lead_term.tmp" "$STATE/term.$lead_term"
+out=$(echo "blocked rerun" | "$CREW" launch lead - 2>&1)
+in_out "lead re-run blocked: reports person needed" "needs a person" "$out"
+[[ "$out" != *"sent to $S-lead"* && "$out" != *"sent instructions to it"* ]] && pass "lead re-run blocked: no false success" || flunk "lead re-run blocked: reported false success"
+[[ $(cnt '"send"') == 1 ]] && pass "lead re-run blocked: does not bypass exit 9" || flunk "lead re-run blocked: unexpected send count"
 
 # 9. Trust handling moves to the hc readiness task.
 reset; touch "$TMP/trust"
@@ -296,6 +363,11 @@ in_log "close team: closes the T7 review tab" "tab close w1:t2"
 [[ $(cnt 'tab close w1:t1') == 0 ]] && pass "close team: leaves the T7 pair tab" || flunk "close team: closed the T7 pair tab"
 in_out "prompt: manager runs the review team" "herdr-crew team review T<n>" "$(cat "$(dirname "$CREW")/../agents/crew-manager/AGENTS.md")"
 in_out "prompt: manager marks done after approval" "mark T<n> done" "$(cat "$(dirname "$CREW")/../agents/crew-manager/AGENTS.md")"
+in_out "prompt: manager monitors through crew wait" 'herdr-crew wait <agent> --timeout 60' "$(cat "$(dirname "$CREW")/../agents/crew-manager/AGENTS.md")"
+in_out "prompt: manager reads screen through crew read" 'herdr-crew read <agent> --lines 80' "$(cat "$(dirname "$CREW")/../agents/crew-manager/AGENTS.md")"
+manager_agent=$(cat "$(dirname "$CREW")/../agents/crew-manager/agent.json")
+jq -e '(.tools | index("Bash(herdr-crew read *)") != null) and (.tools | index("Bash(herdr-crew wait *)") != null) and ([.tools[] | select(startswith("Bash(herdr agent "))] | length == 0)' <<<"$manager_agent" >/dev/null \
+  && pass "manager grants: use crew read/wait, no legacy agent commands" || flunk "manager grants: missing or stale tool grants"
 in_out "prompt: reviewer approves with approve" '"approve"' "$(cat "$(dirname "$CREW")/../agents/code-reviewer/AGENTS.md")"
 in_out "prompt: navigator verdict uses nav fix:" "nav fix:" "$(cat "$(dirname "$CREW")/../agents/navigator/AGENTS.md")"
 
@@ -328,7 +400,7 @@ in_out "budget: settings register a saved context hook" ".context-limit." "$(app
 in_out "budget: brief names the context budget" "Context budget" "$(cat "$HOME/.herdr/crew/$S/$S-t7-driver.brief")"
 
 # handoff: stdin becomes the file, the task gets a step, and the manager is told
-reset; echo idle >"$STATE/$S-manager"
+reset; set_say_status "$manager_term" idle
 out=$(echo "Goal: fix login. Done: test written." | CREW_AGENT=$S-t7-driver CREW_TASK=T7 "$CREW" handoff "half done" 2>&1)
 [[ -f "$HOME/.herdr/crew/$S/handoff-$S-t7-driver.md" ]] && pass "handoff: writes the handoff file" || flunk "handoff: no file"
 in_log "handoff: step on the task" "tsk steps T7 add [handoff] $S-t7-driver: half done"
@@ -504,7 +576,7 @@ done
 in_out "help: documents the global dry-run flag" "--dry-run" "$out"
 rc=0; out=$("$CREW" help 2>&1) || rc=$?
 (( rc == 0 )) && in_out "help: the help subcommand prints the same help" "GLOBAL OPTIONS" "$out" || flunk "help: help subcommand rc=$rc"
-for c in configure launch team say mark status close watch handoff restart completion; do
+for c in configure launch team say read wait mark status close watch handoff restart completion; do
   rc=0; out=$("$CREW" help "$c" 2>&1) || rc=$?
   (( rc == 0 )) && in_out "help: help $c" "USAGE" "$out" || flunk "help: help $c rc=$rc"
   rc=0; out=$("$CREW" "$c" --help 2>&1) || rc=$?
@@ -576,8 +648,10 @@ in_out "dry-run app: argv carries crew environment" 'CREW_WS=sp-dry' "$out"
 # completions
 rc=0; out=$("$CREW" completion bash 2>&1) || rc=$?
 (( rc == 0 )) && in_out "completion: bash names the commands" "herdr-crew" "$out" || flunk "completion: bash rc=$rc"
+in_out "completion: bash includes read and wait" "say read wait mark" "$out"
 rc=0; out=$("$CREW" completion zsh 2>&1) || rc=$?
 (( rc == 0 )) && in_out "completion: zsh uses compdef" "#compdef" "$out" || flunk "completion: zsh rc=$rc"
+in_out "completion: zsh includes read and wait" "say read wait mark" "$out"
 rc=0; out=$("$CREW" completion fish 2>&1) || rc=$?
 (( rc != 0 )) && pass "completion: unknown shell refused" || flunk "completion: accepted fish"
 rc=0; out=$("$CREW" completion 2>&1) || rc=$?

@@ -127,6 +127,17 @@ SH
 
   cat >"$fake/sleep" <<'SH'
 #!/usr/bin/env bash
+if [[ -f "$STATE/watch-mutations" ]]; then
+  while IFS=$'\t' read -r terminal status; do
+    if [[ "$status" == gone ]]; then
+      rm -f "$STATE/term.$terminal"
+    else
+      jq --arg status "$status" '.status = $status' "$STATE/term.$terminal" >"$STATE/term.$terminal.tmp"
+      mv "$STATE/term.$terminal.tmp" "$STATE/term.$terminal"
+    fi
+  done <"$STATE/watch-mutations"
+  rm -f "$STATE/watch-mutations"
+fi
 exit 0
 SH
 
