@@ -1,98 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic test for bin/crew. Fake herdr, tsk and git go first on PATH: they log argv to $LOG and print canned JSON.
-# The real launcher code runs (jq parsing included). No live Herdr, agents or tasks.
-set -euo pipefail
-
-CREW="$(cd "$(dirname "$0")/.." && pwd)/bin/crew"
-ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-FAKE="$TMP/fake"; STATE="$TMP/state"; export LOG="$TMP/log" STATE TMP
-mkdir -p "$FAKE" "$STATE" "$TMP/home"; : >"$LOG"
-export REAL_GIT; REAL_GIT=$(command -v git)
-REPO="$TMP/crew-demo"; mkdir -p "$REPO"; "$REAL_GIT" -C "$REPO" init -q
-REPO=$(cd "$REPO" && pwd -P)
-cd "$REPO"
-S="crew-d-$(printf %s "$REPO" | shasum | cut -c1-4)"
-
-cat >"$FAKE/herdr" <<'SH'
-#!/usr/bin/env bash
-case "$1 $2" in
-  "status server") exit 0 ;;
-  "tab create"|"pane split")
-    n=$(( $(cat "$STATE/n" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$STATE/n"; p="w1:p$n"
-    echo "herdr $* -> $p" >>"$LOG"
-    if [[ "$1" == tab ]]; then echo "{\"result\":{\"tab\":{\"tab_id\":\"w1:t$n\"},\"root_pane\":{\"pane_id\":\"$p\"}}}"
-    else echo "{\"result\":{\"pane\":{\"pane_id\":\"$p\"}}}"; fi ;;
-  "workspace list") echo "{\"result\":{\"workspaces\":[{\"workspace_id\":\"w9\",\"label\":\"$(cat "$STATE/ws" 2>/dev/null)\"}]}}" ;;
-  "workspace create") echo "herdr $*" >>"$LOG"; echo '{"result":{"workspace":{"workspace_id":"w9"}}}' ;;
-  "agent get") echo "herdr $*" >>"$LOG"
-    [[ -f "$STATE/$3" ]] || { echo '{"error":{"code":"agent_not_found"}}'; exit 1; }
-    echo "{\"result\":{\"agent\":{\"pane_id\":\"w1:p1\",\"agent_status\":\"$(cat "$STATE/$3")\"}}}" ;;
-  "agent rename") echo "herdr $*" >>"$LOG"; rm -f "$STATE/stale" "$STATE/$3" ;;
-  "agent start") echo "herdr $*" >>"$LOG"
-    if [[ -f "$STATE/stale" ]]; then echo '{"error":{"code":"agent_name_in_use"}}'; exit 1; fi
-    for ((j=1; j <= $#; j++)); do
-      if [[ "${!j}" == --settings ]]; then j=$((j+1)); printf '%s' "${!j}" >"$STATE/settings.json"; fi
-      if [[ "${!j}" == --agents ]]; then j=$((j+1)); printf '%s' "${!j}" >"$STATE/$3.agents.json"; fi
-    done
-    echo idle >"$STATE/$3"
-    if [[ -f "$TMP/trust" ]]; then rm -f "$TMP/trust"; echo '{"error":{"code":"agent_not_ready"}}'; exit 1; fi ;;
-  "agent wait") echo "herdr $*" >>"$LOG"
-    if [[ -f "$STATE/ambiguous" ]]; then exit 1; fi
-    if [[ -f "$STATE/quick-done" ]]; then [[ " $* " == *" --until done "* ]]; exit $?; fi
-    if [[ -f "$STATE/paste" ]]; then [[ -f "$STATE/entered" ]]; else [[ "$(cat "$STATE/$3" 2>/dev/null)" =~ ^(idle|done)$ ]]; fi ;;
-  "agent read") [[ ! -f "$STATE/paste" ]] || echo '[Pasted text #1 +80 lines]' ;;
-  "agent send-keys") echo "herdr $*" >>"$LOG"; [[ "$4" != enter ]] || touch "$STATE/entered" ;;
-  "agent prompt") echo "herdr $*" >>"$LOG"
-    if [[ "$4" == /exit ]]; then touch "$STATE/shell"; [[ ! -f "$STATE/gone" ]]; else [[ -f "$STATE/$3" ]] || echo idle >"$STATE/$3"; fi ;;
-  "pane read") printf '%s\n' "❯ No, exit" "  Yes, I trust this folder" ;;
-  "pane process-info") echo "herdr $*" >>"$LOG"
-    if [[ -f "$STATE/live" || ( ! -f "$STATE/stale" && ! -f "$STATE/shell" ) ]]; then echo '{"result":{"process_info":{"foreground_process_group_id":2,"shell_pid":1}}}'; exit 0; fi
-    echo '{"result":{"process_info":{"foreground_process_group_id":1,"shell_pid":1}}}' ;;
-  "tab list") echo '{"result":{"tabs":[{"tab_id":"w1:t1","label":"T7 pair"},{"tab_id":"w1:t2","label":"T7 review"}]}}' ;;
-  "pane run"|"pane report-metadata"|"tab close") echo "herdr $*" >>"$LOG" ;;
-  *) echo "herdr $*" >>"$LOG"; echo "unhandled: herdr $*" >&2; exit 1 ;;
-esac
-SH
-cat >"$FAKE/tsk" <<'SH'
-#!/usr/bin/env bash
-echo "tsk $*" >>"$LOG"
-case "$1" in
-  add) echo '{"number":7,"outcome":"created"}' ;;
-  list) if [[ " $* " == *" -p "* && " $* " == *" --done "* ]]; then
-          # done list: T7 only once the open list read it as done (like the real tsk, which hides done tasks)
-          if [[ "$(cat "$STATE/tsk-last" 2>/dev/null)" == done ]]; then echo '[{"number":7,"status":"done","title":"fix the login bug","notes":""}]'; else echo '[]'; fi
-        elif [[ " $* " == *" -p "* ]]; then
-          # board read: T7 status comes from $STATE/tsk-seq (one status per poll), T8 stays ready. Done T7 is left out.
-          if [[ -f "$STATE/tsk-empty" ]]; then echo '[]'
-          else
-            st=ready
-            if [[ -f "$STATE/tsk-seq" ]]; then st=$(head -1 "$STATE/tsk-seq"); tail -n +2 "$STATE/tsk-seq" >"$STATE/tsk-seq.n"; mv -f "$STATE/tsk-seq.n" "$STATE/tsk-seq"; fi
-            echo "$st" >"$STATE/tsk-last"
-            if [[ "$st" == done ]]; then echo '[{"number":8,"status":"ready","title":"other","notes":""}]'
-            else echo "[{\"number\":7,\"status\":\"$st\",\"title\":\"fix the login bug\",\"notes\":\"\"},{\"number\":8,\"status\":\"ready\",\"title\":\"other\",\"notes\":\"\"}]"; fi
-          fi
-        else echo '[{"number":7,"notes":""}]'; fi ;;
-esac
-SH
-cat >"$FAKE/git" <<'SH'
-#!/usr/bin/env bash
-case "$*" in
-  *"rev-parse --path-format=absolute --git-common-dir"*) echo "$TMP/crew-demo/.git" ;;
-  *"symbolic-ref --short HEAD"*) echo crew/T7-pair ;;
-  *"rev-parse --verify"*) [[ -n "${BRANCH_EXISTS:-}" && "${*: -1}" == refs/heads/crew/T7-pair ]] ;;
-  *"worktree add"*|*"checkout --detach"*) echo "git $*" >>"$LOG" ;;
-  *) exec "$REAL_GIT" "$@" ;;
-esac
-SH
-printf '#!/usr/bin/env bash\nexit 0\n' >"$FAKE/claude"
-chmod +x "$FAKE"/*
-export PATH="$FAKE:$PATH" HOME="$TMP/home" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 CREW_WS=w1
-unset CREW_SLUG CREW_REPO CREW_AGENT CREW_TASK CREW_MANAGER CREW_DRY_RUN BRANCH_EXISTS
-source "$ROOT/test/fixtures/fake-runtime.sh"
-install_fake_runtime "$FAKE" "$STATE"
-touch "$STATE/auto-ready"
+# Hermetic launcher integration tests.
+source "$(cd "$(dirname "$0")/.." && pwd)/test/fixtures/launcher-setup.sh"
 
 fails=0
 pass() { echo "PASS: $1"; }
@@ -127,6 +35,14 @@ reject() {
   out=$(printf '%s\n' "$input" | "$CREW" "$@" 2>&1) || rc=$?
   if (( rc != 0 )) && grep -qF -- "$want" <<<"$out" && [[ $(wc -l <"$LOG") == "$before" ]]; then pass "$label"; else flunk "$label (rc=$rc, out: $out)"; fi
 }
+
+# A closed app must fail before task or worktree creation.
+touch "$STATE/no-window"
+rc=0; out=$("$CREW" team pair T7 2>&1) || rc=$?
+(( rc != 0 )) && in_out "app preflight: no window" "herdr-app status" "$out" || flunk "app preflight: accepted closed window"
+[[ $(cnt 'tsk ') == 0 && $(cnt 'worktree add') == 0 ]] && pass "app preflight: no mutations" || flunk "app preflight: mutated before failure"
+rm "$STATE/no-window"
+reset
 
 # 1. lead tab: app space with lead root, manager and board split off it, no worktree
 reset
@@ -800,9 +716,11 @@ rc=0; out=$("$CREW" completion 2>&1) || rc=$?
   ready_reset
   printf '%s\n' blocked >"$READY_STATE/status-on-create"
   mkdir -p "$(dirname "$ready_meta")"; printf 'old meta\n' >"$ready_meta"
+  printf 'old command\n' >"${ready_meta%.meta}.cmd"
   rc=0; out=$(run_ready team investigate T7 "must not send" 2>&1) || rc=$?
   (( rc != 0 )) && [[ $(jq -s '[.[] | select(.[0:2] == ["hc","send"])] | length' "$READY_LOG") == 0 ]] \
     && grep -q '^old meta$' "$ready_meta" \
+    && grep -q '^old command$' "${ready_meta%.meta}.cmd" \
     && pass "readiness: blocked returns failure without send or replacing meta" || flunk "readiness: blocked rc=$rc, output=$out"
 
   ready_reset

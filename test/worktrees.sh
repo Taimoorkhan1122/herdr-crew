@@ -6,16 +6,6 @@ TEMP_ROOT=$(mktemp -d)
 trap 'rm -rf "$TEMP_ROOT"' EXIT
 mkdir -p "$TEMP_ROOT/fake" "$TEMP_ROOT/home" "$TEMP_ROOT/repo" "$TEMP_ROOT/state"
 LOG="$TEMP_ROOT/log"; : >"$LOG"; export LOG STATE="$TEMP_ROOT/state"
-cat >"$TEMP_ROOT/fake/herdr" <<'FAKE'
-#!/usr/bin/env bash
-case "$1 $2" in
-  'agent get') exit 1 ;;
-  'tab create') echo '{"result":{"root_pane":{"pane_id":"w1:p1"}}}' ;;
-  'pane split') echo '{"result":{"pane":{"pane_id":"w1:p2"}}}' ;;
-  'agent start'|'agent prompt'|'agent wait') exit 0 ;;
-  *) echo "unexpected herdr command: $*" >&2; exit 1 ;;
-esac
-FAKE
 cat >"$TEMP_ROOT/fake/tsk" <<'FAKE'
 #!/usr/bin/env bash
 echo '[{"number":7,"notes":"worktree regression"}]'

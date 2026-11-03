@@ -1,5 +1,5 @@
 # Sourced by bin/crew before any dependency check, so `--help` and `--version`
-# work on a machine without tsk, herdr or jq.
+# work on a machine without tsk, hc, herdr-app or jq.
 # Colour and symbols decorate output only. Every word a test or a script matches
 # stays exactly as it was, and colour is off when stdout is not a terminal.
 
@@ -60,7 +60,7 @@ ${U_BLD}COMMANDS${U_OFF}
 ${U_BLD}GLOBAL OPTIONS${U_OFF}
   ${U_GRN}-h${U_OFF}, ${U_GRN}--help${U_OFF}       Show this help and exit
   ${U_GRN}-V${U_OFF}, ${U_GRN}--version${U_OFF}    Show the version and exit
-      ${U_GRN}--dry-run${U_OFF}    Print every mutating herdr, tsk and git call instead of running it
+      ${U_GRN}--dry-run${U_OFF}    Print every mutating hc, herdr-app, tsk and git call instead of running it
 
   ${U_DIM}Global options come before the command, so instructions can never look like one.
   CREW_DRY_RUN=1 in the environment does the same as --dry-run.${U_OFF}

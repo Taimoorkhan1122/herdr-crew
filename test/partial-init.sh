@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 # First-use launch must complete a partial baseline before loading definitions.
-fixture=$(mktemp)
-sed -n '1,88p' "$(dirname "$0")/dry-run.sh" > "$fixture"
-source "$fixture"
-rm "$fixture"
+source "$(cd "$(dirname "$0")/.." && pwd)/test/fixtures/launcher-setup.sh"
 mkdir -p "$REPO/.herdr-crew"
 printf 'keep me\n' > "$REPO/.herdr-crew/custom.txt"
 rc=0

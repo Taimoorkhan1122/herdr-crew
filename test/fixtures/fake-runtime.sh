@@ -206,6 +206,11 @@ rebuild_ls() {
   fi
 }
 
+if [[ ${1:-} == status ]]; then
+  [[ ! -f "$STATE/no-window" ]] || exit 1
+  printf '{"space":"sp1"}\n'
+  exit 0
+fi
 log_call "$@"
 [[ ${1:-} == do ]] || {
   if [[ ${1:-} == ls ]]; then

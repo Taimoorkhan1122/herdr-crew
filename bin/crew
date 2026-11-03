@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # herdr-crew: deterministic crew launcher for Herdr. All logic lives here.
-# CREW_DRY_RUN=1 prints every mutating herdr/git/tsk call ("+ ..." on stderr) instead of running it.
+# CREW_DRY_RUN=1 prints every mutating hc/herdr-app/git/tsk call ("+ ..." on stderr) instead of running it.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
@@ -230,7 +230,8 @@ save_cmd() {
     printf -v arg '%q' "$arg"
     line+="${line:+ }$arg"
   done
-  printf '%s\n' "$line" >"$SDIR/$name.cmd" || die "cannot save agent command for $name"
+  [[ ! -L "$SDIR/$name.cmd.pending" ]] || die "invalid pending command for $name"
+  printf '%s\n' "$line" >"$SDIR/$name.cmd.pending" || die "cannot save agent command for $name"
 }
 
 create_space() {
@@ -399,6 +400,7 @@ register_agent() {
     return 1
   fi
   mkdir -p "$SDIR" || die "cannot create crew state directory"
+  mv "$SDIR/$name.cmd.pending" "$SDIR/$name.cmd" || die "cannot save agent command for $name"
   printf 'rank=%s\njob=%s\nspace=%s\ntab=%s\nterminal=%s\npane=%s\nlabel=%s\ntask=%s\nselection=%s\ncoordinator=%s\ncontext_hook=%s\ncompletion_hook=%s\n' \
     "$rank" "$job" "$space" "$tab" "$terminal" "$pane" "$label" "$task" "$selection" "$coordinator" "$context_hook" "$completion_hook" >"$SDIR/$name.meta"
   printf '%s\n' "$brief_text" >"$SDIR/$name.brief"
@@ -432,7 +434,7 @@ cmd_launch() {
   if [[ "${1:-}" == - ]]; then instr=$(cat); else instr="$*"; fi
   [[ -n "${instr// /}" ]] || die "no instructions (pass them on stdin with '-')"
 
-  # A review needs the pair branch, which a new task never has. Checked before any tsk, herdr or git call.
+  # A review needs the pair branch, which a new task never has. Checked before any tsk, herdr-app or git call.
   if [[ "$RANK" != lead ]]; then
     team=$(team_of "$JOB") || die "job '$JOB' is in no team (see teams/*.conf)"
     [[ "$(conf "$team" worktree)" != pair-branch ]] || die 'review needs an existing pair task: run `herdr-crew team review T<n>` for a task that already has crew/T<n>-pair (the manager does this)'
@@ -898,7 +900,7 @@ sub=${1:-}; [[ $# -gt 0 ]] && shift
 # show_help NAME: one command's help text, or a failure that names the command.
 show_help() { "usage_$1" 2>/dev/null || die "unknown command '$1'. Run: herdr-crew help"; }
 # Pure-text paths run before every dependency check, so help and version work on a
-# machine with no jq, tsk or herdr. Repo and slug resolution above still needs git.
+# machine with no jq, tsk, hc or herdr-app. Repo and slug resolution above still needs git.
 case "$sub" in
   "") usage >&2; exit 1 ;;
   help) [[ $# -gt 0 ]] && show_help "$1" || usage; exit 0 ;;
@@ -909,7 +911,10 @@ if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then show_help "$sub"; exit 0; fi
 command -v jq >/dev/null || die "jq not found on PATH (install: brew install jq)"
 if [[ "$sub" == configure ]]; then cmd_configure "$@"; exit; fi
 if [[ "$sub" == init || "$sub" == upgrade ]]; then project_command "$sub" "$@"; exit; fi
-for c in tsk herdr; do command -v "$c" >/dev/null || die "$c not found on PATH (tsk: brew install smarzban/tap/tsk; herdr: install Herdr first)"; done
+command -v tsk >/dev/null || die "tsk not found on PATH (install: brew install smarzban/tap/tsk)"
+command -v hc >/dev/null || die "hc not found on PATH (install herdr-core: https://herdr.dev/download)"
+command -v herdr-app >/dev/null || die "herdr-app not found on PATH (install the Herdr desktop app: https://herdr.dev/download)"
+herdr-app status >/dev/null 2>&1 || die "herdr-app status failed: open a Herdr app window and try again"
 case "$sub" in
   launch|team)
     project_root

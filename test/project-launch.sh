@@ -22,22 +22,6 @@ printf '%s\n' 'CUSTOM PAYMENT REVIEW ORIGINAL' > "$CREW_REPO/.herdr-crew/agents/
 printf '%s\n' '{"name":"payments-reviewer","description":"Review payments","profile":"inspector"}' > "$CREW_REPO/.herdr-crew/agents/payments-reviewer/agent.json"
 printf '%s\n' 'members=inspector@payments-reviewer' 'worktree=none' > "$CREW_REPO/.herdr-crew/teams/payments.conf"
 printf '%s\n' '{"version":1,"roles":{}}' > "$CREW_REPO/.herdr-crew/config.json"
-cat > "$TMP/fake/herdr" <<'SH'
-#!/bin/bash
-jq -nc --args '$ARGS.positional' -- "$@" >> "$LOG"
-case "$1 $2" in
-  'tab create') jq -nc --args '$ARGS.positional' -- "$@" > "$PANE_ENV_DIR/p1"; echo '{"result":{"root_pane":{"pane_id":"w1:p1"}}}' ;;
-  'pane split') jq -nc --args '$ARGS.positional' -- "$@" > "$PANE_ENV_DIR/p2"; echo '{"result":{"pane":{"pane_id":"w1:p2"}}}' ;;
-  'agent get') exit 1 ;;
-  'pane process-info') echo '{"result":{"process_info":{"foreground_process_group_id":1,"shell_pid":1}}}' ;;
-  'agent start')
-    if [[ -f "$PANE_ENV_DIR/p1" ]]; then
-      policy=$(jq -c '[.[] | select(startswith("OPENCODE_CONFIG_CONTENT=")) | sub("^OPENCODE_CONFIG_CONTENT=";"") | fromjson][0] // {}' "$PANE_ENV_DIR/p1")
-      jq -nc --argjson policy "$policy" '["effective-policy",$policy]' >> "$LOG"
-    fi ;;
-  *) exit 0 ;;
-esac
-SH
 cat > "$TMP/fake/tsk" <<'SH'
 #!/bin/bash
 jq -nc --args '$ARGS.positional' -- tsk "$@" >> "$LOG"
@@ -79,17 +63,19 @@ label='agent registration saves snapshots and sends its first brief'
 check registered_and_sent fixture-t7-payments-reviewer
 printf '%s\n' 'CUSTOM PAYMENT REVIEW CHANGED' > "$CREW_REPO/.herdr-crew/agents/payments-reviewer/AGENTS.md"
 label='Claude restart keeps original inspector definition'
+restart_term=$(sed -n 's/^terminal=//p' "$HOME/.herdr/crew/fixture/fixture-t7-payments-reviewer.meta")
+printf 'working\nnull\nworking\nworking\nworking\n' >"$STATE/get-seq.$restart_term"
 run restart fixture-t7-payments-reviewer
-check bash -c '[[ "$1" == 0 ]] && grep -q "CUSTOM PAYMENT REVIEW ORIGINAL" "$2" && ! grep -q "CUSTOM PAYMENT REVIEW CHANGED" "$2"' _ "$rc" "$LOG"
+check bash -c '[[ "$1" == 0 ]] && rg -q "CUSTOM PAYMENT REVIEW ORIGINAL" "$2" && ! rg -q "CUSTOM PAYMENT REVIEW CHANGED" "$2"' _ "$rc" "$HOME/.herdr/crew/fixture/fixture-t7-payments-reviewer.definition"
 cp "$HOME/.herdr/crew/fixture/fixture-t7-payments-reviewer.definition" "$TMP/saved-definition" 2>/dev/null || :
 rm -f "$HOME/.herdr/crew/fixture/fixture-t7-payments-reviewer.definition"
 label='restart refuses missing snapshot before stopping the agent'
 run restart fixture-t7-payments-reviewer
-check bash -c '[[ "$1" != 0 ]] && ! jq -se '\''any(.[]; .[0:2] == ["agent","prompt"] and .[3] == "/exit")'\'' "$2" >/dev/null' _ "$rc" "$LOG"
+check bash -c '[[ "$1" != 0 ]] && ! jq -se '\''any(.[]; .[0:2] == ["hc","send"] and .[3] == "/exit")'\'' "$2" >/dev/null' _ "$rc" "$LOG"
 printf '%s\n' 'not-json' > "$HOME/.herdr/crew/fixture/fixture-t7-payments-reviewer.definition"
 label='restart refuses malformed snapshot before stopping the agent'
 run restart fixture-t7-payments-reviewer
-check bash -c '[[ "$1" != 0 ]] && ! jq -se '\''any(.[]; .[0:2] == ["agent","prompt"] and .[3] == "/exit")'\'' "$2" >/dev/null' _ "$rc" "$LOG"
+check bash -c '[[ "$1" != 0 ]] && ! jq -se '\''any(.[]; .[0:2] == ["hc","send"] and .[3] == "/exit")'\'' "$2" >/dev/null' _ "$rc" "$LOG"
 [[ ! -f "$TMP/saved-definition" ]] || cp "$TMP/saved-definition" "$HOME/.herdr/crew/fixture/fixture-t7-payments-reviewer.definition"
 printf '%s\n' 'CUSTOM PAYMENT REVIEW ORIGINAL' > "$CREW_REPO/.herdr-crew/agents/payments-reviewer/AGENTS.md"
 # Invalid later slot must fail before task, workspace, pane or Git worktree mutation.
@@ -110,6 +96,8 @@ check bash -c '[[ "$1" == 0 ]] && jq -e '\''[.[] | select(.[0] == "herdr-app" an
 # Restart must use the saved definition and native policy, not edited files.
 printf '%s\n' 'CUSTOM PAYMENT REVIEW CHANGED' > "$CREW_REPO/.herdr-crew/agents/payments-reviewer/AGENTS.md"
 label='restart retains original inspector guidance and native policy after project edit'
+restart_term=$(sed -n 's/^terminal=//p' "$HOME/.herdr/crew/fixture/fixture-t9-payments-reviewer.meta")
+printf 'working\nnull\nworking\nworking\nworking\n' >"$STATE/get-seq.$restart_term"
 run restart fixture-t9-payments-reviewer
 check bash -c '[[ "$1" == 0 ]] && grep -q "CUSTOM PAYMENT REVIEW ORIGINAL" "$HOME/.herdr/crew/fixture/fixture-t9-payments-reviewer.definition" && ! grep -q "CUSTOM PAYMENT REVIEW CHANGED" "$2"' _ "$rc" "$LOG"
 label='fresh launch uses changed project inspector guidance'
