@@ -9,6 +9,23 @@ reset_case() {
   export CREW_REPO="$REPO" CREW_SLUG="case-$1" CREW_WS=w1
   unset HERDR_WORKSPACE_ID HC_TERMINAL_ID
 }
+reset_case finishedlead
+"$CREW" launch lead first >/dev/null 2>&1; first_rc=$?
+lead_meta="$HOME/.herdr/crew/$CREW_SLUG/$CREW_SLUG-lead.meta"
+old_lead=$(sed -n 's/^terminal=//p' "$lead_meta")
+"$FAKE/hc" kill "$old_lead" >/dev/null
+: >"$LOG"
+out=$("$CREW" launch lead second 2>&1); rc=$?
+new_lead=$(sed -n 's/^terminal=//p' "$lead_meta")
+label='finished lead relaunches in a new tab without saying to old lead'; check bash -c '[[ $1 == 0 && $2 == 0 && -n "$3" && "$3" != "$4" ]] && jq -se --arg old "$4" '\''([.[] | select(.[0:3] == ["herdr-app","do","tab.new"])] | length) == 1 and ([.[] | select(.[0:3] == ["hc","send",$old])] | length) == 0'\'' "$5" >/dev/null' _ "$first_rc" "$rc" "$new_lead" "$old_lead" "$LOG"
+reset_case leadspace
+"$CREW" launch lead first >/dev/null 2>&1; rc=$?
+space=$(jq -r .id "$STATE/space")
+label='first lead gets real space in initial argv without bootstrap terminal'; check bash -c '[[ $1 == 0 ]] && jq -e --arg space "$2" '\''.argv | index("CREW_WS=" + $space) != null'\'' "$3/term.t1" >/dev/null && jq -se '\''([.[] | select(.[0:3] == ["herdr-app","do","space.new"] and (index("--tab") == null) and (index("--argv") == null))] | length) == 1 and ([.[] | select(.[0:3] == ["herdr-app","do","tab.new"])] | length) == 1'\'' "$4" >/dev/null && [[ $(find "$3" -name "term.*" -type f | wc -l | tr -d " ") == 3 ]]' _ "$rc" "$space" "$STATE" "$LOG"
+reset_case teamspace
+"$CREW" team investigate T7 first >/dev/null 2>&1; rc=$?
+space=$(jq -r .id "$STATE/space")
+label='first team member gets real space in initial argv without bootstrap terminal'; check bash -c '[[ $1 == 0 ]] && jq -e --arg space "$2" '\''.argv | index("CREW_WS=" + $space) != null'\'' "$3/term.t1" >/dev/null && jq -se '\''([.[] | select(.[0:3] == ["herdr-app","do","space.new"] and (index("--tab") == null) and (index("--argv") == null))] | length) == 1 and ([.[] | select(.[0:3] == ["herdr-app","do","tab.new"])] | length) == 1'\'' "$4" >/dev/null && [[ $(find "$3" -name "term.*" -type f | wc -l | tr -d " ") == 1 ]]' _ "$rc" "$space" "$STATE" "$LOG"
 reset_case coexist
 export BRANCH_EXISTS=1
 "$CREW" team pair T7 first >/dev/null 2>&1; pair_rc=$?

@@ -19,7 +19,7 @@ app_agent_count() { json_log '[.[] | select(.[0] == "herdr-app" and .[1] == "do"
 panes_ok() {
   if json_log -e '
     [.[] | select(.[0] == "herdr-app" and .[1] == "do" and
-      (.[2] == "space.new" or .[2] == "tab.new" or .[2] == "pane.split"))]
+      (.[2] == "tab.new" or .[2] == "pane.split"))]
     | all(.[]; . as $call | ($call | index("--argv")) as $i |
       ($call[$i + 1] | fromjson) as $argv |
       all(["CREW_SLUG=", "CREW_TASK=", "CREW_AGENT=", "CREW_WS="][];
@@ -47,7 +47,7 @@ reset
 reset
 out=$(echo "add hello.txt" | "$CREW" launch lead - 2>&1)
 in_out "lead: ready" "ready: $S-lead" "$out"
-json_log -e '([.[] | select(.[0:3] == ["herdr-app","do","space.new"]) ] | length) == 1 and ([.[] | select(.[0:3] == ["herdr-app","do","pane.split"]) ] | length) == 2' >/dev/null \
+json_log -e '([.[] | select(.[0:3] == ["herdr-app","do","space.new"]) ] | length) == 1 and ([.[] | select(.[0:3] == ["herdr-app","do","tab.new"]) ] | length) == 1 and ([.[] | select(.[0:3] == ["herdr-app","do","pane.split"]) ] | length) == 2' >/dev/null \
   && pass "lead: one app space and two pane splits" || flunk "lead: app topology is incomplete"
 json_log -e 'all(.[] | select(.[0] == "herdr-app"); (index("--env") == null))' >/dev/null \
   && pass "lead: app argv uses env prefix, not --env" || flunk "lead: app log contains --env"

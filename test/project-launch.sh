@@ -57,7 +57,7 @@ registered_and_sent() {
 }
 claude_policy() {
   [[ "$rc" == 0 ]] || return 1
-  app_log -e '[.[] | select(.[0] == "herdr-app" and .[1] == "do" and (.[2] == "space.new" or .[2] == "tab.new" or .[2] == "pane.split")) | . as $call | ($call|index("--argv")) as $i | ($call[$i+1]|fromjson) as $argv | ($argv|index("--agents")) as $a | select($a != null) | $argv[$a+1] | fromjson | to_entries[] | .value | select((.prompt | contains("CUSTOM PAYMENT REVIEW ORIGINAL")) and (.tools | index("Write") | not) and (.disallowedTools | index("Write")))] | length > 0' >/dev/null
+  app_log -e '[.[] | select(.[0] == "herdr-app" and .[1] == "do" and (.[2] == "tab.new" or .[2] == "pane.split")) | . as $call | ($call|index("--argv")) as $i | ($call[$i+1]|fromjson) as $argv | ($argv|index("--agents")) as $a | select($a != null) | $argv[$a+1] | fromjson | to_entries[] | .value | select((.prompt | contains("CUSTOM PAYMENT REVIEW ORIGINAL")) and (.tools | index("Write") | not) and (.disallowedTools | index("Write")))] | length > 0' >/dev/null
 }
 label='Claude project inspector uses selected guidance and native read-only policy'
 run team payments T7 'inspect payments'
@@ -99,7 +99,7 @@ printf '%s\n' '{"version":1,"roles":{"payments-reviewer":{"agent":"opencode","mo
 label='OpenCode project inspector has selected guidance and native deny policy'
 run team payments T9 'inspect payments'
 app_log > "$TMP/app-log.json"
-check bash -c '[[ "$1" == 0 ]] && jq -e '\''[.[] | select(.[0] == "herdr-app" and .[1] == "do" and (.[2] == "space.new" or .[2] == "tab.new" or .[2] == "pane.split")) | . as $call | ($call|index("--argv")) as $i | ($call[$i+1]|fromjson)[] | select(startswith("OPENCODE_CONFIG_CONTENT=")) | sub("^OPENCODE_CONFIG_CONTENT=";"") | fromjson | .agents.crew | select((.system | contains("CUSTOM PAYMENT REVIEW ORIGINAL")) and .permissions[0] == {action:"*",resource:"*",effect:"deny"} and (any(.permissions[]; .action == "edit" and .effect == "allow")|not) and (any(.permissions[]; .action == "subagent" and .effect == "allow")|not))] | length > 0'\'' "$2" >/dev/null' _ "$rc" "$TMP/app-log.json"
+check bash -c '[[ "$1" == 0 ]] && jq -e '\''[.[] | select(.[0] == "herdr-app" and .[1] == "do" and (.[2] == "tab.new" or .[2] == "pane.split")) | . as $call | ($call|index("--argv")) as $i | ($call[$i+1]|fromjson)[] | select(startswith("OPENCODE_CONFIG_CONTENT=")) | sub("^OPENCODE_CONFIG_CONTENT=";"") | fromjson | .agents.crew | select((.system | contains("CUSTOM PAYMENT REVIEW ORIGINAL")) and .permissions[0] == {action:"*",resource:"*",effect:"deny"} and (any(.permissions[]; .action == "edit" and .effect == "allow")|not) and (any(.permissions[]; .action == "subagent" and .effect == "allow")|not))] | length > 0'\'' "$2" >/dev/null' _ "$rc" "$TMP/app-log.json"
 original_opencode_policy=$(jq -r '[.[] | select(.[0:2] == ["herdr-app","do"] and (index("--argv") != null)) | .[-1] | fromjson | .[] | select(startswith("OPENCODE_CONFIG_CONTENT=")) | sub("^OPENCODE_CONFIG_CONTENT=";"") | fromjson][0]' "$TMP/app-log.json")
 # Restart must use the saved definition and native policy, not edited files.
 printf '%s\n' 'CUSTOM PAYMENT REVIEW CHANGED' > "$CREW_REPO/.herdr-crew/agents/payments-reviewer/AGENTS.md"
@@ -114,6 +114,6 @@ label='OpenCode restart sends original native policy'; check jq -ne --argjson a 
 label='fresh launch uses changed project inspector guidance'
 run team payments T10 'inspect payments again'
 app_log > "$TMP/fresh-app-log.json"
-check bash -c '[[ "$1" == 0 ]] && jq -e '\''[.[] | select(.[0] == "herdr-app" and .[1] == "do" and (.[2] == "space.new" or .[2] == "tab.new" or .[2] == "pane.split")) | . as $call | ($call|index("--argv")) as $i | ($call[$i+1]|fromjson)[] | select(startswith("OPENCODE_CONFIG_CONTENT=")) | sub("^OPENCODE_CONFIG_CONTENT=";"") | fromjson | .agents.crew.system | select(contains("CUSTOM PAYMENT REVIEW CHANGED"))] | length > 0'\'' "$2" >/dev/null' _ "$rc" "$TMP/fresh-app-log.json"
+check bash -c '[[ "$1" == 0 ]] && jq -e '\''[.[] | select(.[0] == "herdr-app" and .[1] == "do" and (.[2] == "tab.new" or .[2] == "pane.split")) | . as $call | ($call|index("--argv")) as $i | ($call[$i+1]|fromjson)[] | select(startswith("OPENCODE_CONFIG_CONTENT=")) | sub("^OPENCODE_CONFIG_CONTENT=";"") | fromjson | .agents.crew.system | select(contains("CUSTOM PAYMENT REVIEW CHANGED"))] | length > 0'\'' "$2" >/dev/null' _ "$rc" "$TMP/fresh-app-log.json"
 (( fails == 0 )) || { printf '%s checks failed\n' "$fails"; exit 1; }
 printf 'ALL PASS\n'

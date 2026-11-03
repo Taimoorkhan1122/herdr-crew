@@ -234,9 +234,13 @@ case "$operation" in
     tab_name=$(option_value --tab "$@" || true)
     argv=$(option_value --argv "$@" || printf '[]')
     [[ -n "$name" && -n "$folder" ]] || exit 2
-    [[ -n "$tab_name" ]] || tab_name=Main
     jq -n --arg id "$(next_id space sp)" --arg name "$name" --arg folder "$folder" '{id:$id,name:$name,folder:$folder}' >"$STATE/space"
     space=$(jq -r '.id' "$STATE/space")
+    if [[ -z "$tab_name" ]]; then
+      rebuild_ls
+      jq -nc --arg space "$space" '{space:$space}'
+      exit 0
+    fi
     tab=$(next_id tab tb); pane=$(next_id pane p); terminal=$(next_id terminal t)
     new_terminal "$terminal" "$pane" "$argv" "$space" "$tab" "$tab_name"
     jq -n --arg id "$tab" --arg name "$tab_name" --arg space "$space" --arg terminal "$terminal" --arg pane "$pane" '{id:$id,name:$name,space:$space,terminals:[{terminal:$terminal,pane:$pane,status:null,app:"",name:$name,sub_agents:[]}]}' >"$STATE/tab.$tab"

@@ -272,7 +272,7 @@ Merging is always your decision. Crew instructions require approval before a pus
 ### Workspace and tab selection
 
 - The launcher first uses `CREW_WS`, then the `herdr.space` label on the caller's app terminal.
-- Outside an app terminal, it falls back to a live space named `crew-<slug>`. It creates that space with its first real tab on the first run if needed.
+- Outside an app terminal, it falls back to a live space named `crew-<slug>`. It creates an empty space if needed, then creates the first real tab with the space ID in its environment.
 - Without a running app window, runtime commands stop with a clear error. Headless use on a server, container or CI runner is unsupported.
 
 ### Typical session

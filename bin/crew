@@ -236,14 +236,10 @@ save_cmd() {
 
 create_space() {
   local result
-  result=$(mutj '{"space":"sp-dry","tab":"tb-dry","terminal":"t-dry","pane":"p-dry"}' \
-    herdr-app do space.new --name "$1" --folder "${4:-$REPO}" --tab "$2" --argv "$3") || die "cannot create app space $1"
+  result=$(mutj '{"space":"sp-dry"}' \
+    herdr-app do space.new --name "$1" --folder "$2") || die "cannot create app space $1"
   NEW_SPACE=$(jq -r '.space // empty' <<<"$result")
-  NEW_TAB=$(jq -r '.tab // empty' <<<"$result")
-  NEW_TERM=$(jq -r '.terminal // empty' <<<"$result")
-  [[ -n "$NEW_SPACE" && -n "$NEW_TAB" && -n "$NEW_TERM" ]] || die "herdr-app space.new returned incomplete IDs: $result"
-  if [[ -n "${CREW_DRY_RUN:-}" ]]; then NEW_PANE=$(jq -r '.pane // "dry-pane"' <<<"$result")
-  else NEW_PANE=$(pane_for_terminal "$NEW_TERM") || die "cannot find pane for terminal $NEW_TERM"; fi
+  [[ -n "$NEW_SPACE" ]] || die "herdr-app space.new returned no space ID: $result"
 }
 
 create_tab() {
@@ -266,14 +262,11 @@ split_pane() {
   [[ -n "$NEW_PANE" && -n "$NEW_TERM" ]] || die "herdr-app pane.split returned incomplete IDs: $result"
 }
 
-# target_space NAME FIRST_TAB CWD ARGV: reuse a live space or create it with its first real terminal.
-target_space() {
-  local name=$1 tab_name=$2 cwd=$3 argv=$4
+# ensure_space NAME CWD: reuse a live space or create an empty one before building agent argv.
+ensure_space() {
   resolve_space
-  TARGET_TAB=""; TARGET_TERM=""; TARGET_PANE=""
-  if [[ -n "$WS" ]]; then return 0; fi
-  create_space "$name" "$tab_name" "$argv" "$cwd"
-  WS=$NEW_SPACE; TARGET_TAB=$NEW_TAB; TARGET_TERM=$NEW_TERM; TARGET_PANE=$NEW_PANE
+  if [[ -z "$WS" ]]; then create_space "$1" "$2"; WS=$NEW_SPACE; fi
+  export CREW_WS="$WS"
 }
 
 # wait_ready TERM TIMEOUT: wait for a usable status, answering only Claude's known trust prompt.
@@ -443,8 +436,8 @@ cmd_launch() {
   fi
 
   # Re-running lead uses saved app metadata and verifies its terminal still exists.
-  local existing_term
-  if [[ "$RANK" == lead ]] && existing_term=$(terminal_of "$SLUG-lead") && [[ -n "$existing_term" ]] && hc get "$existing_term" --json >/dev/null 2>&1; then
+  local existing_term existing_info
+  if [[ "$RANK" == lead ]] && existing_term=$(terminal_of "$SLUG-lead") && [[ -n "$existing_term" ]] && existing_info=$(hc get "$existing_term" --json 2>/dev/null) && jq -e '.state != "finished"' <<<"$existing_info" >/dev/null; then
     cmd_say "$SLUG-lead" "$instr"
     return
   fi
@@ -459,17 +452,12 @@ cmd_launch() {
   fi
   if [[ "$RANK" == lead ]]; then
     local lead="$SLUG-lead" manager="$SLUG-manager" root manager_selection manager_definition manager_context manager_completion lead_selection lead_definition lead_context lead_completion lead_tab lead_term manager_tab manager_term manager_pane label="crew $SLUG" lead_argv manager_argv board_argv
-    resolve_space
+    ensure_space "crew-$SLUG" "$REPO"
     agent_argv "$lead" lead "" ""
     lead_selection=$AGENT_SELECTION; lead_definition=$AGENT_DEFINITION; lead_context=$AGENT_CONTEXT_HOOK; lead_completion=$AGENT_COMPLETION_HOOK
     lead_argv=$(app_argv_json)
-    target_space "crew-$SLUG" "$label" "$REPO" "$lead_argv"
-    export CREW_WS="$WS"
-    if [[ -n "$TARGET_TAB" ]]; then lead_tab=$TARGET_TAB; lead_term=$TARGET_TERM; root=$TARGET_PANE
-    else
-      create_tab "$WS" "$label" "$REPO" "$lead_argv"
-      lead_tab=$NEW_TAB; lead_term=$NEW_TERM; root=$NEW_PANE
-    fi
+    create_tab "$WS" "$label" "$REPO" "$lead_argv"
+    lead_tab=$NEW_TAB; lead_term=$NEW_TERM; root=$NEW_PANE
     agent_argv "$manager" manager "" ""
     manager_selection=$AGENT_SELECTION; manager_definition=$AGENT_DEFINITION; manager_context=$AGENT_CONTEXT_HOOK; manager_completion=$AGENT_COMPLETION_HOOK
     manager_argv=$(app_argv_json)
@@ -566,7 +554,9 @@ cmd_team() {
       cwd="$path" ;;
   esac
 
-  # Create worktree first. Then the first argv becomes the space's real initial tab if needed.
+  # Create the space before building agent argv so every pane receives its ID.
+  ensure_space "crew-$SLUG" "$cwd"
+  space=$WS
   label="$T $team"
   for ((i = 0; i < ${#names[@]}; i++)); do
     agent_argv "${names[$i]}" "${ranks[$i]}" "$T" "${jobs[$i]}"
@@ -574,14 +564,8 @@ cmd_team() {
     contexts+=("$AGENT_CONTEXT_HOOK"); completions+=("$AGENT_COMPLETION_HOOK")
     argv_json=$(app_argv_json)
     if (( i == 0 )); then
-      target_space "crew-$SLUG" "$label" "$cwd" "$argv_json"
-      export CREW_WS="$WS"
-      space=$WS
-      if [[ -n "$TARGET_TAB" ]]; then tab=$TARGET_TAB; terms+=("$TARGET_TERM"); panes+=("$TARGET_PANE")
-      else
-        create_tab "$space" "$label" "$cwd" "$argv_json"
-        tab=$NEW_TAB; terms+=("$NEW_TERM"); panes+=("$NEW_PANE")
-      fi
+      create_tab "$space" "$label" "$cwd" "$argv_json"
+      tab=$NEW_TAB; terms+=("$NEW_TERM"); panes+=("$NEW_PANE")
     else
       dir=down; if (( i == 1 )); then dir=right; fi
       split_pane "$root" "$dir" "$argv_json"
