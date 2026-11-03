@@ -1,6 +1,15 @@
 # Current state
 
-Status as of 2026-10-14. Crew launch and project Q&A have live scratch-repo evidence; full development acceptance remains pending. Two live problems are open: the Haiku driver claimed it had no shell, and the Manager used an archived task number. Live test 3 (review and test teams) has not run. Verification is tracked per feature below; launch tests do not establish full lifecycle acceptance.
+Status as of 2026-11-03. The runtime on branch `feat/herdr-core-app-runtime` is `herdr-core` (`hc`) plus the Herdr desktop app; that branch is not merged, and no live crew has run on it. The live evidence below was collected on the legacy `herdr` runtime. Full development acceptance remains pending. Two live problems are open: the Haiku driver claimed it had no shell, and the Manager used an archived task number. Live test 3 (review and test teams) has not run. Verification is tracked per feature below; launch tests do not establish full lifecycle acceptance.
+
+## herdr-core and herdr-app runtime cutover (2026-11-03)
+
+- Runtime: `herdr-core` (`hc`) plus the Herdr desktop app. The app owns spaces, tabs and panes. `hc` owns send, read, wait, status and kill. The terminal ID is the control contract. [ADR 0025](adr/0025-herdr-core-app-runtime.md) records the decision.
+- Documentation is cut over on branch `feat/herdr-core-app-runtime`: the README, SKILL, feature reference and ADR status lines describe the new runtime, the desktop-session requirement, the per-pane `env` argv prefix, tab titles, `read`/`wait`, message refusal, restart and close.
+- The launcher and test cutover is in progress on the same branch. Automated suite evidence for that work is recorded by its task; this section does not claim it. No installation, publication, merge or live acceptance is recorded.
+- No live crew has run on this runtime. The validation spikes covered app-created terminal IDs, the `env` prefix, readiness with a trust dialog, blocked-send exit codes, and same-terminal restart with `hc` 0.1.16 and `herdr-app` 0.1.11. Evidence: [validation note](../research_notes/Herdr%20core%20and%20app%20migration/validation-spikes-2026-11-02.md).
+- Remaining live gaps: an app restart with live terminals, pane title behavior, the split ratio, headless use, and a real permission-blocked agent. Restart after `hc kill` means a new pane, so the team must be relaunched. A blocked agent needs a person. A desktop session is required; servers, containers and CI runners are unsupported.
+- Unchanged: `~/.herdr/crew` and `~/.herdr/worktrees`, the tsk and Git flows, and the command names and exit codes. `tsk setup herdr` and `herdr server reload-config` no longer apply; the board is a plain `tsk` terminal.
 
 ## herdr-core and herdr-app migration research (2026-11-02)
 
@@ -68,6 +77,8 @@ Independent KISS review found one high-priority handoff-path race and four mediu
 
 ## What works (verified live)
 
+These results were collected on the legacy `herdr` runtime. None has been repeated on `herdr-core` and `herdr-app`.
+
 - `/herdr-crew lead "..."` starts a crew tab with the Lead, the Manager, and the board (live test 2).
 - The Lead creates tasks and messages the Manager, and the Manager starts a pair team (live test 2).
 - The Haiku driver starts and runs in its own worktree (live test 2).
@@ -76,12 +87,12 @@ Independent KISS review found one high-priority handoff-path race and four mediu
 
 ## Automated checks and partial live coverage
 
-- The hermetic test `test/dry-run.sh` runs 170 checks with fake `herdr`, `tsk`, and `git` shims. All pass under `/bin/bash` (bash 3.2). It covers launch, team, say, mark, status, close, the AXI brief lines, and the fixes below.
+- The hermetic test `test/dry-run.sh` runs with fake `hc`, `herdr-app`, `tsk` and `git` shims. It covers launch, team, say, mark, status, close, the AXI brief lines, and the fixes below.
 - Autonomous task completion (ADR 0014). The manager runs pair, then review, then fix rounds (max 3), and marks `done` after the reviewer approves. `close <T#> <team>` closes one team tab, and a review re-run reuses its worktree. Dry-run checks cover the launcher and the prompt text only. The loop has not run live.
 - The Lead monitor (ADR 0015). `herdr-crew watch` polls the board every 20 seconds and prints one line per change. The Lead runs it with the Monitor tool. Dry-run checks cover task changes and unchanged-task silence. A board Monitor started during live Q&A; independent agent/handoff wake-up coverage remains pending.
 - The context budget (ADR 0015). `bin/ctx-guard` warns each agent once at 135K tokens, and the launcher registers it with `--settings`. `handoff` writes the handoff file, and `restart` starts the agent again from its saved brief. Dry-run checks cover the hook output, the once-per-session marker, the settings flag, the handoff and restart flow. Live threshold crossing and a full handoff/resume cycle remain unverified.
 - Launching a review spec (`code-reviewer`) is refused before any `tsk`, `herdr`, or `git` call. Before this fix it created an orphan task.
-- `team` outside a crew pane uses `HERDR_WORKSPACE_ID` inside Herdr, and the `crew-<slug>` workspace outside it. Before this fix it stopped with `no workspace known`.
+- `team` outside a crew terminal resolves the app space from `CREW_WS`, then the `herdr.space` label of the caller terminal, then `crew-<slug>`. Before this fix it stopped with `no workspace known`.
 - `launch` sets a new task to `ready` after `tsk add`. Before this fix it stayed `open`.
 - The AXI tools: the `axi:` lines reach the brief, and a missing tool prints a warning. The Manager ran `quota-axi --no-credential-refresh` during live Q&A. The Lead's own Lavish review flow remains unverified; direct Lavish use by the implementing agent is separate evidence.
 - The `nestjs-expert` persona now lists the two Supabase skills. Their source is `supabase/agent-skills`, added to `skills.sources`.
@@ -116,3 +127,4 @@ Independent KISS review found one high-priority handoff-path race and four mediu
 1. Debug the driver shell issue (open issue 1) with a live run.
 2. Run live test 3, covering the review and test teams. A review now needs a task that already has `crew/T#-pair`, so run `pair` first.
 3. Complete the linked Q&A follow-up after a source change, then verify the context-threshold handoff/resume and remaining rank/skill/AXI cases when live acceptance is explicitly resumed. Do not restart workers for a documentation-only update.
+4. When a live run is authorized, run one crew on `hc` and `herdr-app` in a disposable fixture. Cover launch, say, mark, read, wait, close and a restart after a normal exit. Record the unverified cases in the cutover section above.

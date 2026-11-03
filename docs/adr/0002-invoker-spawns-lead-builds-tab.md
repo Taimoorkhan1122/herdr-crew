@@ -1,6 +1,6 @@
 # 0002. The invoker always spawns, and the Lead builds the crew tab
 
-- Status: Accepted
+- Status: Superseded in part by 0025 (crew tab creation and layout)
 - Date: 2026-10-13
 
 ## Context

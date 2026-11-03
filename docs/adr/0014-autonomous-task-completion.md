@@ -1,6 +1,6 @@
 # 0014. The crew finishes each task on its own, up to approval
 
-- Status: Accepted
+- Status: Superseded in part by 0025 (tab close mechanics)
 - Date: 2026-10-13
 
 ## Context

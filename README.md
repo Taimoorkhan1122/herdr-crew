@@ -2,13 +2,13 @@
 
 ![Pixel-art HERDR-CREW command hub: Lead and Manager coordinate engineering, testing, API builds, and investigation around a shared task board.](docs/assets/herdr-crew-banner-landscape.png)
 
-herdr-crew starts a small team of configurable agents inside Herdr, a terminal program that splits one window into tabs and panes. One command, `/herdr-crew lead "<what you want>"`, starts a Lead agent that talks to you, a Manager agent that starts worker teams, and a task board. Development teams use separate Git worktrees. The investigation team reads the current repo without a new branch or worktree. Every agent shares one board, which is tsk, a small command-line task list.
+herdr-crew starts a small team of configurable agents inside Herdr, the desktop app that shows spaces, tabs and panes. One command, `/herdr-crew lead "<what you want>"`, starts a Lead agent that talks to you, a Manager agent that starts worker teams, and a task board. Development teams use separate Git worktrees. The investigation team reads the current repo without a new branch or worktree. Every agent shares one board, which is tsk, a small command-line task list.
 
 **Experimental:** automated launcher checks pass, but full live development acceptance is pending. See [known limitations](#known-limitations) and [verification status](docs/STATE.md).
 
 ## How it works
 
-A crew lives in one Herdr tab. The Lead and the Manager sit at the top, and the board sits under the Lead:
+A crew lives in one app tab. The Lead and the Manager sit at the top, and the board sits under the Lead:
 
 ```
 +------------------------+------------------------+
@@ -37,23 +37,30 @@ open -> ready -> started -> review -> done
 
 The Lead marks tasks `ready`. Agents mark them `started` and `review`. For development, the Manager marks `done` after code-review approval; you still merge the branch. For investigation, the Manager checks answer coverage and marks `done` without a merge branch. A task is `blocked` when information prevents progress, or when development review is not approved after three rounds. Standalone jobs without a Manager leave results at `review` for manual acceptance.
 
-Agents talk with `herdr-crew say <agent> "<message>"` and report with `herdr-crew mark <T#> <status> "<note>"`. The mark command updates the board, adds the note as a step, and sets the pane title.
+Agents talk with `herdr-crew say <agent> "<message>"` and report with `herdr-crew mark <T#> <status> "<note>"`. The mark command updates the board, adds the note as a step, and renames the saved tab to `<label> · <agent>: <note>`.
 
 ## Requirements
 
-- **Herdr**, with the `herdr` command on your PATH.
+- **herdr-app**, the desktop app, and **herdr-core** (`hc`) on your PATH. The app owns spaces, tabs and panes. `hc` owns send, read, wait, status and kill. Crew control actions address saved terminal IDs. Install both from https://herdr.dev/download; the app installer also installs `herdr-core` when it is missing. Supported desktops are Apple Silicon macOS, Linux x86-64 or ARM64 with Vulkan, and Windows x64.
+- **A desktop session.** `launch`, `team`, `say`, `mark`, `status`, `watch`, `close` and `restart` need a running app window that answers `herdr-app status`. A server, container or CI runner without a desktop session cannot run them. `help`, `--version`, `completion`, `init`, `upgrade` and `configure` still work without the app.
 - **Claude Code** (the default), or **OpenCode 2** for roles assigned to it. Mixed-agent teams need both selected CLIs on PATH. Authenticate each CLI separately before launching a crew.
-- **tsk**, the task board. Install it with `brew install smarzban/tap/tsk`, then run these once:
-  - `tsk setup claude` registers tsk with Claude Code.
-  - `tsk setup herdr` registers tsk with Herdr.
-  - `herdr server reload-config` makes a running Herdr pick up the change.
+- **tsk**, the task board. Install it with `brew install smarzban/tap/tsk`, then run `tsk setup claude` once to register tsk with Claude Code. The board is a plain `tsk` terminal in the crew tab. `tsk setup herdr` and `herdr server reload-config` no longer apply.
 - **jq**, **git**, **rg** (ripgrep), and **shasum**. The launcher uses rg for visible-paste detection and shasum for the repo slug.
 - **npm**, only if you want `install-skills` to install the AXI tools.
 - Bash and a `readlink` command supporting `-f` (the launcher resolves symlinks with it).
 
 ## Installation
 
-Clone or download this repository, then run the following from its root. Keep the checkout in a permanent location: these links point to it.
+Install the runtime first. Download the Herdr desktop app from https://herdr.dev/download, and install `herdr-core` if the app installer did not. Confirm both commands:
+
+```bash
+hc --version
+herdr-app --version
+```
+
+The app and core update independently, and no compatibility matrix is published. If a runtime command fails, report both versions with the error.
+
+Then clone or download this repository, and run the following from its root. Keep the checkout in a permanent location: these links point to it.
 
 ```bash
 project_dir="$(pwd -P)"
@@ -116,7 +123,7 @@ herdr-crew configure code-reviewer claude --model inherit --effort high
 herdr-crew configure --show
 ```
 
-Replace `provider/model` with a model available in your authenticated OpenCode installation. Supported agents are `claude` and `opencode` (version 2). Other Herdr agent kinds, including Codex and Gemini, need permission/lifecycle adapters before they can be selected. Unsupported selections fail explicitly.
+Replace `provider/model` with a model available in your authenticated OpenCode installation. Supported agents are `claude` and `opencode` (version 2). Other agent kinds, including Codex and Gemini, need permission/lifecycle adapters before they can be selected. Unsupported selections fail explicitly.
 
 Runtime assignments live in `.herdr-crew/config.json` in the primary project checkout. Each project's linked worker worktrees read that same file, including uncommitted configuration edits. For a manually entered linked checkout with separate Git metadata that does not identify its primary working directory, set `CREW_REPO` to the primary project directory; crew-created workers already receive it. Ambiguous checkout discovery fails rather than writing into Git metadata. You can commit it to share assignments, or keep it local. It contains agent/model settings, never credentials:
 
@@ -132,7 +139,7 @@ Runtime assignments live in `.herdr-crew/config.json` in the primary project che
 
 Valid keys are `lead`, `manager`, `member`, `inspector`, and the job personas below. Job settings override their rank; project settings override the bundled defaults. Changing agent clears inherited model/effort values from the previous runtime. With the same agent, omitted model/effort retains the inherited setting; changing an OpenCode model clears its inherited variant because variants belong to that model; `inherit` explicitly uses that agent's own default. For OpenCode, `--effort` selects a catalog variant of the explicit `--model`; supported names vary by model, so an unsupported choice fails without saving. Keep the variant in `effort`, rather than embedding `#variant` in the model field. The adapter writes the native `#variant` only on the crew agent selection, because OpenCode's root model default drops variants. The wizard and explicit OpenCode efforts query `opencode api --standalone model.list` in the primary checkout; this uses a private metadata server, creates no agent session and submits no model prompt. Catalog errors cancel setup without writing pending changes. Deleting a role entry restores inheritance. Without a config file, the existing Claude defaults apply. There are no user-wide overrides.
 
-Selection changes apply to new launches. Restart keeps the saved agent/model/effort in the same pane; it does not migrate a running session to another agent. Configure and `--show` need no Herdr server or tsk. Launch preflight checks the selected executables and OpenCode major version before creating tasks, worktrees or panes.
+Selection changes apply to new launches. Restart keeps the saved agent/model/effort in the same terminal; it does not migrate a running session to another agent. Configure and `--show` need no app window or tsk. Launch preflight checks the selected executables and OpenCode major version before creating tasks, worktrees or panes.
 
 OpenCode receives a per-pane native role policy and runs with `--standalone`. Read-only ranks retain their command allowlists; members have edit/shell access and explicit Git push/merge denies. Subagents are disabled to prevent a broader helper policy bypassing the rank. Member access outside the working directory may ask for approval. Managed runtime configuration and trusted plugins remain part of the runtime's trust boundary.
 
@@ -140,7 +147,7 @@ Claude keeps its hooks, Skill/Explore and Monitor workflow. OpenCode uses portab
 
 ### Start a crew
 
-Open a Herdr pane, change into your repo, and invoke the herdr-crew skill from your configured agent (or run `herdr-crew launch lead "<instructions>"` in the shell). For the default Claude installation, type:
+Open a terminal in the Herdr desktop app, change into your repo, and invoke the herdr-crew skill from your configured agent (or run `herdr-crew launch lead "<instructions>"` in the shell). For the default Claude installation, type:
 
 ```
 /herdr-crew lead "Add a CSV export button to the reports page"
@@ -148,13 +155,13 @@ Open a Herdr pane, change into your repo, and invoke the herdr-crew skill from y
 
 Then this happens:
 
-1. The launcher finds your repo with `git` and uses the Herdr workspace you are in.
+1. The launcher finds your repo with `git` and uses the app space you are in, or reuses the `crew-<slug>` space.
 2. It opens a tab named `crew <slug>` with the Lead, the Manager, and the board. The tab opens in the background, so switch to it yourself.
 3. The Lead reads your request, may ask you a question in its pane, creates tasks on the board, and marks them `ready`.
 4. The Lead sends the task numbers to the Manager, which opens a tab for each task.
 5. The command prints a line or two, such as the tab name. The rest happens in the crew tab.
 
-Watch progress in four places: the board pane, the pane titles (such as `T7 <agent>: started`), the team tabs, and `herdr-crew status`.
+Watch progress in three places: the board pane, the team tab titles (such as `T7 pair · <agent>: started`), and `herdr-crew status`.
 
 ### Ask for a visual plan before implementation
 
@@ -215,7 +222,7 @@ herdr-crew team pair T12 --persona driver=nestjs-expert --persona navigator=secu
 
 The part before `=` is the job, and the part after `=` is the domain persona. Stack several with `+`.
 
-`team` finds its workspace the same way `launch` does. In a crew pane it uses that pane's workspace. In any other Herdr pane it uses the current workspace. Outside Herdr it uses the `crew-<slug>` workspace, as described in "Running from outside Herdr".
+`team` finds its space the same way `launch` does. In a crew terminal it uses that terminal's space. Otherwise it reuses the `crew-<slug>` space, or creates it, as described in "Workspace and tab selection".
 
 ### Check status
 
@@ -223,7 +230,7 @@ The part before `=` is the job, and the part after `=` is the domain persona. St
 herdr-crew status
 ```
 
-It prints one line per open task in the form `T<number><TAB><status><TAB><title>`, then one line per live agent in the form `<agent name><TAB><state>`. States are `idle`, `working`, `blocked`, `done`, and `unknown`. Add `--json` to print the raw task list instead, for scripts.
+It prints one line per open task in the form `T<number><TAB><status><TAB><title>`, then one line per live agent in the form `<agent name><TAB><state>`. States are `idle`, `working`, `blocked`, and `done`, plus `error` when the runtime reports it. An agent with no reported status is omitted. Add `--json` to print the raw task list instead, for scripts.
 
 ### Close a team
 
@@ -232,7 +239,7 @@ herdr-crew close T12
 herdr-crew close T12 review
 ```
 
-Without a team, this closes the tabs whose names start with `T12 `. With a team, it closes only that tab, such as `T12 review`. It keeps the worktrees and prints the command to remove each one, such as `git -C <repo> worktree remove <path>`. It never runs that command itself.
+Without a team, this closes the tabs whose names start with `T12 `, such as `T12 pair`, and never a tab named `T120`. With a team, it closes only that tab, such as `T12 review`. It resolves each tab by its label, then closes the tab by ID. It keeps the worktrees and prints the command to remove each one, such as `git -C <repo> worktree remove <path>`. It never runs that command itself.
 
 ### Watch the board
 
@@ -256,17 +263,17 @@ Goal, what is done, what is in progress, next steps, files, task number.
 EOF
 ```
 
-The handoff is saved to `~/.herdr/crew/<slug>/handoff-<agent>.md`, and the task gets a `[handoff]` step. The agent that started it, the manager for a worker, is told. It restarts the agent with `herdr-crew restart <agent>`, or restarts a whole team with `herdr-crew restart T12`. A restart tolerates an agent that has already exited, waits for the pane to reach its shell, then starts the agent in the same pane with its saved brief and a line that points to the handoff. A stale registry name is cleared only after its old pane reaches the shell.
+The handoff is saved to `~/.herdr/crew/<slug>/handoff-<agent>.md`, and the task gets a `[handoff]` step. The agent that started it, the manager for a worker, is told. It restarts the agent with `herdr-crew restart <agent>`, or restarts a whole team with `herdr-crew restart T12`. A restart reuses the same terminal: it sends `/exit`, waits for a shell prompt or a null status, sends the saved exact agent command, waits for readiness, then submits the saved brief with a line that points to the handoff. It never creates a tab. If the terminal reports `finished`, its pane is gone and the restart fails; relaunch the team. A blocked agent needs a person before it can restart.
 
 ### Merge the work
 
 Merging is always your decision. Crew instructions require approval before a push, merge, or worktree removal. Member sessions also receive explicit Bash denies for `git push` and `git merge`. A completed development task has passed code review and can have a branch such as `crew/T7-pair` for you to merge. A completed investigation contains answers and has no merge branch. The Lead has no direct Git command access, but its gh-axi allowlist includes merge operations; its approval rule remains necessary.
 
-### Running from outside Herdr
+### Workspace and tab selection
 
-- Inside Herdr, the crew uses your current workspace.
-- Outside Herdr with the server running, the crew uses a workspace named `crew-<slug>`. The script creates it on the first run and reuses it later. Run `herdr` to attach and see it.
-- Outside Herdr with no server running, the command stops and tells you to start Herdr with `herdr` and run it again there.
+- In a crew terminal, the crew uses that terminal's app space.
+- Otherwise the launcher reuses a live space named `crew-<slug>`. It creates the space with its first real tab on the first run.
+- Without a running app window, runtime commands stop with a clear error. Headless use on a server, container or CI runner is unsupported.
 
 ### Typical session
 
@@ -304,7 +311,7 @@ herdr-crew launch investigator - <<'EOF'
 EOF
 ```
 
-Run this inside Herdr. Read the resulting answers with `tsk list T<n> --json`, using the task number printed by the launcher. Without a running Manager, the task stays at `review` for manual acceptance. It does not claim `done` automatically. You can also ask the Manager to run `herdr-crew team investigate T<n> --persona investigator=nestjs-expert` for a backend investigation.
+Run this inside a crew terminal. Read the resulting answers with `tsk list T<n> --json`, using the task number printed by the launcher. Without a running Manager, the task stays at `review` for manual acceptance. It does not claim `done` automatically. You can also ask the Manager to run `herdr-crew team investigate T<n> --persona investigator=nestjs-expert` for a backend investigation.
 
 A separate investigator costs another agent session and coordination. Quick facts stay with the existing helper path. Investigation closes after its answers are accepted; it is not a permanently running project index.
 
@@ -360,19 +367,21 @@ Worktrees live at `~/.herdr/worktrees/<slug>/T<n>-<team>`. The `<slug>` is the f
 
 ### Commands
 
-Every command explains itself. `herdr-crew help` lists them, `herdr-crew help <command>` and `herdr-crew <command> --help` show one command's arguments, options and examples, and `herdr-crew --version` prints the version. All five help forms work without tsk, herdr or jq on PATH. Git is still required, because repo and slug resolution runs first. Global options go before the command: `--dry-run` (the same as `CREW_DRY_RUN=1`), `--help`, `--version`.
+Every command explains itself. `herdr-crew help` lists them, `herdr-crew help <command>` and `herdr-crew <command> --help` show one command's arguments, options and examples, and `herdr-crew --version` prints the version. All five help forms work without tsk, `hc`, `herdr-app` or jq on PATH. Git is still required, because repo and slug resolution runs first. Global options go before the command: `--dry-run` (the same as `CREW_DRY_RUN=1`), `--help`, `--version`.
 
 | Command | What it does |
 |---|---|
-| `herdr-crew launch <spec> -` | Starts a crew (`lead`), or a new task with its team (a job spec). Instructions come on stdin, or as words after the spec. |
-| `herdr-crew team <team> <T#> [--persona <job>=<domain>[+<domain>]]... ["instructions"]` | Starts a team for an existing task. Optional instructions override the task notes for the brief. Workspace selection also supports other Herdr panes or a running external server. |
-| `herdr-crew say <agent> "<message>"` | Sends to an idle/done agent, or waits up to 20 seconds. Task workers can receive queued task steps. A busy Lead/Manager has no task queue; output can say `message NOT delivered` even with exit 0. |
-| `herdr-crew mark <T#> <status> "<note>"` | Sets the task status, adds the note as a step, and sets the pane title. |
-| `herdr-crew status [--json]` | Prints one line per open task (T number, status, title) and one per crew agent (name, state), tab separated. `--json` prints the raw task list for scripts. |
-| `herdr-crew close <T#> [<team>]` | Closes all matching task tabs, or one team's tab. Keeps worktrees and prints removal commands for existing paths. |
+| `herdr-crew launch <spec> -` | Starts a crew (`lead`), or a new task with its team (a job spec). Instructions come on stdin, or as words after the spec. Needs the app. |
+| `herdr-crew team <team> <T#> [--persona <job>=<domain>[+<domain>]]... ["instructions"]` | Starts a team for an existing task. Optional instructions override the task notes for the brief. Reuses the crew space, or creates `crew-<slug>`. |
+| `herdr-crew say <agent> "<message>"` | Sends when the agent is idle or done. For a working agent it waits 20 seconds, then sends if the agent is idle or done. A blocked, still-working or missing recipient gets one queued `[msg from X to Y]` task step when it has a task; otherwise the command warns that the message was not delivered. A busy recipient never fails the command, and a blocked send is never forced. |
+| `herdr-crew read <agent> [--lines N]` | Reads the saved terminal for an agent. Options pass through to `hc read`. |
+| `herdr-crew wait <agent> [--timeout S]` | Waits on the saved terminal for an agent. Options pass through to `hc wait`. |
+| `herdr-crew mark <T#> <status> "<note>"` | Sets the task status, adds the note as a step, and renames the saved tab to `<label> · <agent>: <note>`. The label keeps its `T# TEAM` prefix. |
+| `herdr-crew status [--json]` | Prints one line per open task (T number, status, title) and one per crew agent (name, state), tab separated. States come from the saved terminals. `--json` prints the raw task list for scripts. |
+| `herdr-crew close <T#> [<team>]` | Closes all matching task tabs, or one team's tab, by tab label and ID. Keeps worktrees and prints removal commands for existing paths. |
 | `herdr-crew watch` | Prints one line per board change: task status, a crew agent that became `blocked` or `done` or disappeared, and each new handoff. The Lead runs it with Monitor. Press Ctrl+C to stop. |
 | `herdr-crew handoff "<status>"` | Saves the handoff body from stdin, adds a step to the task, and tells the agent that restarts this one. Run by the agent itself. |
-| `herdr-crew restart <agent or T#>` | Sends `/exit`, waits for the pane to reach its shell, and starts the agent again from its saved brief. A `T#` restarts every agent of that task. |
+| `herdr-crew restart <agent or T#>` | Sends `/exit`, waits for a shell prompt or a null status, then sends the saved agent command and brief in the same terminal. Never creates a tab. A finished terminal fails; relaunch the team. A `T#` restarts every agent of that task. |
 | `herdr-crew completion <bash\|zsh>` | Prints a shell completion script on stdout. |
 
 ### Output style
@@ -381,20 +390,20 @@ Result lines start with `crew:`, progress lines with `->`, and warnings with `wa
 
 ### Environment variables
 
-The launcher sets these in each pane it creates:
+The launcher sets these in each terminal it creates:
 
 | Variable | Meaning |
 |---|---|
 | `CREW_SLUG` | The crew id, such as `my-app-3f9c` |
 | `CREW_REPO` | Path to the repo |
-| `CREW_TASK` | Task number in team panes, such as `T7`. Empty in Lead and Manager panes. |
+| `CREW_TASK` | Task number in team terminals, such as `T7`. Empty in Lead and Manager terminals. |
 | `CREW_AGENT` | This agent's name. `say` and `mark` use it as the sender. Defaults to `user`. |
 | `CREW_MANAGER` | The Manager's agent name |
-| `CREW_WS` | The Herdr workspace that holds the crew |
+| `CREW_WS` | The herdr-app space ID that holds the crew |
 
 Claude agents receive a SessionStart hook that restores these variables for Bash commands on startup and resume. Agents started before this hook was added need `herdr-crew restart <agent>` to receive it.
 
-You can set `CREW_REPO` and `CREW_SLUG` yourself to override the repo path and crew id. Set `CREW_DRY_RUN=1` to print mutating Herdr, tsk, and Git calls instead of executing them. Discovery reads and dependency checks still run; this is a mutation preview, not an offline simulation.
+You can set `CREW_REPO` and `CREW_SLUG` yourself to override the repo path and crew id. Set `CREW_DRY_RUN=1` to print mutating app, core, tsk and Git calls instead of executing them. Discovery reads and dependency checks still run; this is a mutation preview, not an offline simulation.
 
 For all environment controls, command options, hook behavior, and completion flows, see [the feature reference](docs/features.md).
 
@@ -467,16 +476,22 @@ From the skill directory, run:
 /bin/bash test/agent-config.sh
 ```
 
-The test puts fake `herdr`, `tsk`, and `git` commands first on your PATH, and checks the calls they record. No real agents start and no real tasks are made. Each check prints `PASS` or `FAIL`, and the run ends with `ALL PASS` or a failure count.
+The test puts fake `hc`, `herdr-app`, `tsk`, and `git` commands first on your PATH, and checks the calls they record. No real agents start and no real tasks are made. Each check prints `PASS` or `FAIL`, and the run ends with `ALL PASS` or a failure count.
 
-`test/worktrees.sh` uses real Git with fake Herdr/tsk and a disposable HOME. It checks branch attachment, retained edits, reuse, and ownership refusals. Neither suite establishes live agent behavior. [STATE.md](docs/STATE.md) separates automated checks from live acceptance and remaining gaps.
+`test/worktrees.sh` uses real Git with fake core/app and tsk commands and a disposable HOME. It checks branch attachment, retained edits, reuse, and ownership refusals. Neither suite establishes live agent behavior. [STATE.md](docs/STATE.md) separates automated checks from live acceptance and remaining gaps.
 
 ## Known limitations
 
+- The runtime needs a desktop session. `launch`, `team`, `close` and the other runtime commands do not work on a headless server, container or CI runner.
+- Restart reuses the terminal only after a normal agent exit. After `hc kill`, or when the terminal reports `finished`, the pane is gone: relaunch the team. A blocked agent needs a person before it can restart.
+- A blocked recipient is never forced. The message is queued once on its task, or reported as not delivered when the agent has no task.
+- Tab titles replace pane titles. A shared tab shows the latest agent event, not a title for each pane.
+- Pane splits use the app default ratio. `pane.split` has no ratio argument, so the board divider is not set to 0.3.
+- Unverified on this runtime: an app restart with live terminals, pane title behavior, the split ratio, headless use, and a real permission-blocked agent. No live crew has run since the migration.
 - Visual planning has automated launch/instruction checks and a browser-checked example. Live Lead/planner approval, revision, offline fallback and restart acceptance remain pending; see [the acceptance checklist](docs/planning/acceptance.md).
 
 - In a live test, the Haiku driver once said it had no shell, and the Manager once used an old, archived task number. Both are under investigation.
-- The launcher answers Claude's "trust this folder" prompt only for agents it starts in a new pane. Any other trust prompt is yours to answer.
+- The launcher answers Claude's "trust this folder" prompt only for agents it starts in an app-created terminal. Any other trust prompt is yours to answer.
 - Worktrees are never removed automatically. Run the removal command that `close` prints when you are done.
 - A busy Lead/Manager message can be undelivered with exit 0. Read the delivery output and preserve important questions in tsk.
 - A startup warning does not prove a prompt was lost. Inspect the pane and recorded messages before sending anything again.

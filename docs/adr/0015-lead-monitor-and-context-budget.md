@@ -1,6 +1,6 @@
 # 0015. The Lead watches the board with Monitor, and every agent has a context budget
 
-- Status: Accepted
+- Status: Superseded in part by 0025 (restart and watch use terminals)
 - Date: 2026-10-13
 
 ## Context
