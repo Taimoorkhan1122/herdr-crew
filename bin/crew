@@ -592,7 +592,7 @@ cmd_say() {
     state=$(jq -r '.status.state // empty' <<<"$info" 2>/dev/null || true)
     if [[ "$state" == working ]]; then
       info=$(hc wait "$terminal" --timeout 20 2>/dev/null || true)
-      state=$(jq -r '.status.state // (.status | strings) // empty' <<<"$info" 2>/dev/null || true)
+      state=$(jq -r '.status | strings' <<<"$info" 2>/dev/null || true)
     fi
     if [[ "$state" == idle || "$state" == done ]]; then
       if submit "$to" "[from $ME] $msg"; then
@@ -640,16 +640,16 @@ cmd_mark() {
   mv -f "$tmp" "$result" || { rm -f "$tmp"; die "cannot save task result"; }
   mut tsk status "$T" "$st"
   mut tsk steps "$T" add "$note"
-  tab=$(sed -n 's/^tab=//p' "$SDIR/$ME.meta" 2>/dev/null | head -1)
-  label=$(sed -n 's/^label=//p' "$SDIR/$ME.meta" 2>/dev/null | head -1)
+  tab=$(sed -n 's/^tab=//p' "$SDIR/$ME.meta" 2>/dev/null | head -1) || true
+  label=$(sed -n 's/^label=//p' "$SDIR/$ME.meta" 2>/dev/null | head -1) || true
   if [[ -n "$tab" && -n "$label" ]]; then
     mut herdr-app do tab.rename --id "$tab" --name "$label · $ME: $note"
   else
     crew_warn "no saved tab for $ME; task update saved without a tab rename"
   fi
   case "$st" in blocked|review|done)
-    coordinator=$(sed -n 's/^coordinator=//p' "$SDIR/$ME.meta" 2>/dev/null | head -1)
-    completion_hook=$(sed -n 's/^completion_hook=//p' "$SDIR/$ME.meta" 2>/dev/null | head -1)
+    coordinator=$(sed -n 's/^coordinator=//p' "$SDIR/$ME.meta" 2>/dev/null | head -1) || true
+    completion_hook=$(sed -n 's/^completion_hook=//p' "$SDIR/$ME.meta" 2>/dev/null | head -1) || true
     [[ "$coordinator" =~ ^[a-zA-Z0-9_-]+$ ]] || coordinator=${CREW_MANAGER:-}
     if [[ "$coordinator" =~ ^[a-zA-Z0-9_-]+$ && "$completion_hook" == "$SDIR/$ME.task-complete."* && -f "$completion_hook" && ! -L "$completion_hook" ]]; then
       /bin/bash "$completion_hook" "$result" "$ME" "$T" "$coordinator" "$SDIR" "$ROOT/bin/crew-say" || crew_warn "completion notification failed; result saved for retry"

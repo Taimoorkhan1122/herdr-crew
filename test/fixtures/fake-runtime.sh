@@ -104,7 +104,15 @@ case "$command" in
         fi
         ;;
       wait)
-        jq -nc --arg address "$terminal" --argjson term "$(cat "$STATE/term.$terminal")" '{address:$address,state:($term.state // "running"),status:(if ($term.status // null) == null then null else {state:$term.status} end),labels:($term.labels // {}),argv:($term.argv // []),pid:($term.pid // null)}'
+        reason=timeout
+        if [[ -f "$STATE/wait-status.$terminal" ]]; then
+          wait_status=$(cat "$STATE/wait-status.$terminal")
+          jq --arg status "$wait_status" '.status = $status' "$STATE/term.$terminal" >"$STATE/term.$terminal.tmp"
+          mv "$STATE/term.$terminal.tmp" "$STATE/term.$terminal"
+          rm -f "$STATE/wait-status.$terminal"
+          reason=status
+        fi
+        jq -nc --arg reason "$reason" --argjson term "$(cat "$STATE/term.$terminal")" '{ended:false,reason:$reason,status:($term.status // null),turn:($term.turn // 0),exit_code:null,signal:null,children:[],from:null}'
         ;;
       kill)
         jq '.state = "finished"' "$STATE/term.$terminal" >"$STATE/term.$terminal.tmp"

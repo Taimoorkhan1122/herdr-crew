@@ -195,6 +195,7 @@ in_log "dash text: = form keeps the title" "tsk add --title=-fix parser --notes=
 # 5. say sends once when idle; waits once then queues when still working or blocked.
 say_term=$(sed -n 's/^terminal=//p' "$HOME/.herdr/crew/$S/$S-t7-driver.meta")
 set_say_status() { jq --arg status "$2" '.status = $status | .sendExit = 0' "$STATE/term.$1" >"$STATE/term.$1.tmp" && mv "$STATE/term.$1.tmp" "$STATE/term.$1"; }
+set_wait_status() { printf '%s\n' "$2" >"$STATE/wait-status.$1"; }
 reset; set_say_status "$say_term" idle
 out=$(CREW_AGENT=$S-t7-navigator "$CREW" say "$S-t7-driver" "hello there" 2>&1)
 hc_log -e --arg terminal "$say_term" --arg message "[from $S-t7-navigator] hello there" '[.[] | select(. == ["hc","send",$terminal,$message])] | length == 1' >/dev/null \
@@ -207,6 +208,19 @@ hc_log -e --arg terminal "$say_term" '[.[] | select(. == ["hc","wait",$terminal,
   && pass "say working: waits once before queue" || flunk "say working: did not wait exactly once"
 in_log "say working: queues one task step" "tsk steps T7 add [msg from $S-t7-navigator to $S-t7-driver] hold on"
 [[ $(cnt '"send"') == 0 ]] && pass "say working: no hc send after wait timeout" || flunk "say working: sent to busy agent"
+[[ $(grep -cF 'tsk steps T7 add [msg from' "$LOG") == 1 ]] && pass "say working: queues exactly once" || flunk "say working: queued more than once"
+reset; set_say_status "$say_term" working; set_wait_status "$say_term" idle
+rc=0; out=$(CREW_AGENT=$S-t7-navigator "$CREW" say "$S-t7-driver" "wait to idle" 2>&1) || rc=$?
+(( rc == 0 )) && in_out "say wait-idle: sends after wait" "sent to $S-t7-driver" "$out" || flunk "say wait-idle: rc=$rc ($out)"
+hc_log -e --arg terminal "$say_term" --arg message "[from $S-t7-navigator] wait to idle" '[.[] | select(. == ["hc","send",$terminal,$message])] | length == 1' >/dev/null \
+  && pass "say wait-idle: sends exactly once" || flunk "say wait-idle: wrong send count"
+[[ $(cnt 'tsk steps') == 0 ]] && pass "say wait-idle: does not queue" || flunk "say wait-idle: queued delivered message"
+reset; set_say_status "$say_term" working; set_wait_status "$say_term" done
+rc=0; out=$(CREW_AGENT=$S-t7-navigator "$CREW" say "$S-t7-driver" "wait to done" 2>&1) || rc=$?
+(( rc == 0 )) && in_out "say wait-done: sends after wait" "sent to $S-t7-driver" "$out" || flunk "say wait-done: rc=$rc ($out)"
+hc_log -e --arg terminal "$say_term" --arg message "[from $S-t7-navigator] wait to done" '[.[] | select(. == ["hc","send",$terminal,$message])] | length == 1' >/dev/null \
+  && pass "say wait-done: sends exactly once" || flunk "say wait-done: wrong send count"
+[[ $(cnt 'tsk steps') == 0 ]] && pass "say wait-done: does not queue" || flunk "say wait-done: queued delivered message"
 reset; set_say_status "$say_term" blocked
 out=$(CREW_AGENT=$S-t7-navigator "$CREW" say "$S-t7-driver" "permission needed" 2>&1)
 in_out "say blocked: queues task step" "queued on T7" "$out"
@@ -226,6 +240,11 @@ in_log "mark: note as a step" "tsk steps T7 add tests pass"
 mark_tab=$(sed -n 's/^tab=//p' "$HOME/.herdr/crew/$S/$S-t7-driver.meta")
 json_log -e --arg tab "$mark_tab" --arg name "T7 pair · $S-t7-driver: tests pass" 'any(.[]; . == ["herdr-app","do","tab.rename","--id",$tab,"--name",$name])' >/dev/null \
   && pass "mark: renames tab and keeps T7 pair prefix" || flunk "mark: wrong tab rename or label prefix"
+reset; rc=0; out=$(CREW_AGENT=$S-t99-orphan "$CREW" mark T99 review "orphan note" 2>&1) || rc=$?
+(( rc == 0 )) && pass "mark: missing meta does not stop task update" || flunk "mark: missing meta rc=$rc ($out)"
+in_log "mark: missing meta still records task status" "tsk status T99 review"
+in_log "mark: missing meta still records task note" "tsk steps T99 add orphan note"
+in_out "mark: missing meta warns about tab rename" "no saved tab for $S-t99-orphan" "$out"
 
 # 7. status: task rows stay first; agent statuses map saved terminals from one hc ls.
 set_say_status "$lead_term" done
@@ -688,7 +707,9 @@ rc=0; out=$("$CREW" completion 2>&1) || rc=$?
   out=$("$RFAKE/hc" read "$split_term" --lines 2)
   in_out "runtime fake: hc read returns screen text" "fixture screen" "$out"
   "$RFAKE/hc" keys "$split_term" down enter
-  "$RFAKE/hc" wait "$split_term" >/dev/null
+  out=$("$RFAKE/hc" wait "$split_term")
+  jq -e 'has("ended") and has("reason") and has("status") and has("turn") and has("exit_code") and has("signal") and has("children") and has("from") and .status == null and .reason == "timeout"' <<<"$out" >/dev/null \
+    && pass "runtime fake: hc wait returns WaitResult" || flunk "runtime fake: hc wait result shape"
   "$RFAKE/hc" label "$split_term" crew.task=T7
   jq -e '.labels["crew.task"] == "T7"' <<<"$("$RFAKE/hc" get "$split_term" --json)" >/dev/null \
     && pass "runtime fake: keys, wait and label are controllable" || flunk "runtime fake: keys, wait or label"
