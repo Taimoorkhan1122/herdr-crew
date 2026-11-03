@@ -25,10 +25,13 @@ git -C "$CREW_REPO" branch crew/T7-pair
 worktree="$HOME/.herdr/worktrees/fixture/T7-pair"
 [[ "$(git -C "$worktree" symbolic-ref --short HEAD)" == crew/T7-pair ]]
 printf '%s\n' 'keep this work' >"$worktree/uncommitted.txt"
+retire_fake_task T7
 "$CREW" team pair T7 >"$TEMP_ROOT/output" 2>&1
 [[ "$(cat "$worktree/uncommitted.txt")" == 'keep this work' ]]
 echo 'PASS: existing pair branch attaches and retained worktree keeps edits'
+retire_fake_task T7
 "$CREW" team test T7 >"$TEMP_ROOT/output" 2>&1
+retire_fake_task T7
 "$CREW" team test T7 >"$TEMP_ROOT/output" 2>&1
 [[ "$(git -C "$HOME/.herdr/worktrees/fixture/T7-test" symbolic-ref --short HEAD)" == crew/T7-test ]]
 echo 'PASS: test team creates and reuses its branch worktree'

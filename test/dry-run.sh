@@ -22,10 +22,8 @@ panes_ok() {
       (.[2] == "space.new" or .[2] == "tab.new" or .[2] == "pane.split"))]
     | all(.[]; . as $call | ($call | index("--argv")) as $i |
       ($call[$i + 1] | fromjson) as $argv |
-      if $argv == ["tsk"] then true else
-        all(["CREW_SLUG=", "CREW_TASK=", "CREW_AGENT=", "CREW_WS="][];
-          . as $prefix | any($argv[]; startswith($prefix)))
-      end)
+      all(["CREW_SLUG=", "CREW_TASK=", "CREW_AGENT=", "CREW_WS="][];
+          . as $prefix | any($argv[]; startswith($prefix))))
   ' >/dev/null; then pass "$1"; else flunk "$1 (incomplete app argv)"; fi
 }
 # reject LABEL WANT STDIN ARGS...: must fail with WANT and must not reach herdr, tsk or git worktree
@@ -38,6 +36,7 @@ reject() {
 
 # A closed app must fail before task or worktree creation.
 touch "$STATE/no-window"
+retire_fake_task T7
 rc=0; out=$("$CREW" team pair T7 2>&1) || rc=$?
 (( rc != 0 )) && in_out "app preflight: no window" "herdr-app status" "$out" || flunk "app preflight: accepted closed window"
 [[ $(cnt 'tsk ') == 0 && $(cnt 'worktree add') == 0 ]] && pass "app preflight: no mutations" || flunk "app preflight: mutated before failure"
@@ -52,10 +51,10 @@ json_log -e '([.[] | select(.[0:3] == ["herdr-app","do","space.new"]) ] | length
   && pass "lead: one app space and two pane splits" || flunk "lead: app topology is incomplete"
 json_log -e 'all(.[] | select(.[0] == "herdr-app"); (index("--env") == null))' >/dev/null \
   && pass "lead: app argv uses env prefix, not --env" || flunk "lead: app log contains --env"
-json_log -e 'any(.[]; .[0:3] == ["herdr-app","do","pane.split"] and .[4] == "down" and .[-1] == "[\"tsk\"]")' >/dev/null \
+json_log -e 'any(.[]; .[0:3] == ["herdr-app","do","pane.split"] and .[4] == "down" and (.[-1] | fromjson | index("tsk") != null))' >/dev/null \
   && pass "lead: board is tsk in the down split" || flunk "lead: board argv or direction is wrong"
 space_id=$(jq -r '.id // empty' "$STATE/space" 2>/dev/null || true)
-json_log --arg space "$space_id" -e 'all([.[] | select(.[0] == "herdr-app" and .[1] == "do" and (.[2] == "pane.split"))][]; . as $call | ($call | index("--argv")) as $i | ($call[$i + 1] | fromjson) as $argv | if $argv == ["tsk"] then true else any($argv[]; . == ("CREW_WS=" + $space)) end)' >/dev/null \
+json_log --arg space "$space_id" -e 'all([.[] | select(.[0] == "herdr-app" and .[1] == "do" and (.[2] == "pane.split"))][]; . as $call | ($call | index("--argv")) as $i | ($call[$i + 1] | fromjson) as $argv | any($argv[]; . == ("CREW_WS=" + $space)))' >/dev/null \
   && pass "lead: later app argv uses its space ID in CREW_WS" || flunk "lead: later app CREW_WS does not match space"
 for field in "space=$space_id" "tab=tb1" "terminal=t1" "label=crew $S"; do
   grep -qF "$field" "$HOME/.herdr/crew/$S/$S-lead.meta" && pass "lead: meta saves $field" || flunk "lead: meta missing $field"
@@ -66,6 +65,7 @@ panes_ok "lead: every pane carries its agent env and CREW_WS"
 # 2. team pair on a job persona: task, own branch worktree, driver (member) + navigator (inspector)
 reset
 space_id=$(jq -r '.id' "$STATE/space")
+retire_fake_task T7
 out=$(echo "fix the login bug" | env CREW_WS="$space_id" "$CREW" launch driver - 2>&1)
 in_out "pair: task created" "created task T7" "$out"
 in_log "pair: tsk add with --title/--notes/-p repo" "tsk add --title=fix the login bug --notes=fix the login bug -p $REPO --json"
@@ -90,21 +90,25 @@ panes_ok "pair: every pane carries its agent env and CREW_WS"
 
 # 3. review checks out the pair branch; test branches from it (or from HEAD when no pair branch)
 reset
+retire_fake_task T7
 out=$(BRANCH_EXISTS=1 "$CREW" team review T7 "check it" 2>&1)
 in_log "review: detached checkout of crew/T7-pair" "worktree add --detach $HOME/.herdr/worktrees/$S/T7-review crew/T7-pair"
 in_out "review: reviewer starts as inspector" "--agent crew-inspector -n $S-t7-code-reviewer" "$(app_argv_text)"
 panes_ok "review: every pane carries its agent env and CREW_WS"
 reset
+retire_fake_task T7
 out=$(BRANCH_EXISTS=1 "$CREW" team test T7 "write tests" 2>&1)
 in_log "test: new branch from crew/T7-pair" "worktree add -b crew/T7-test $HOME/.herdr/worktrees/$S/T7-test crew/T7-pair"
 in_out "test: tester is member rank" "--agent crew-member -n $S-t7-tester" "$(app_argv_text)"
 reset
+retire_fake_task T8
 out=$("$CREW" team test T8 "write tests" 2>&1)
 in_log "test: falls back to HEAD without a pair branch" "worktree add -b crew/T8-test $HOME/.herdr/worktrees/$S/T8-test HEAD"
 reject "review: refuses without the pair branch" "no branch crew/T8-pair" "" team review T8 "check it"
 
 # 4. text starting with a dash
 reset
+retire_fake_task T7
 out=$(echo "-fix parser" | "$CREW" launch driver - 2>&1)
 in_log "dash text: = form keeps the title" "tsk add --title=-fix parser --notes=-fix parser -p $REPO --json"
 
@@ -222,12 +226,14 @@ in_out "lead re-run blocked: reports person needed" "needs a person" "$out"
 
 # 9. Trust handling moves to the hc readiness task.
 reset; touch "$TMP/trust"
+retire_fake_task T7
 out=$(echo "fix trust" | "$CREW" launch driver - 2>&1)
 [[ $(cnt 'agent start') == 0 ]] && pass "trust: no legacy agent start call" || flunk "trust: used legacy agent start"
 rm -f "$TMP/trust"
 
 # 10. outside legacy Herdr: reuse the named app space
 reset
+retire_fake_task T7
 out=$(echo "reuse" | env -u HERDR_ENV "$CREW" launch driver - 2>&1)
 space_id=$(jq -r '.id' "$STATE/space")
 json_log --arg space "$space_id" -e 'any(.[]; .[0:3] == ["herdr-app","do","tab.new"] and (index("--space") as $i | .[$i+1] == $space))' >/dev/null \
@@ -250,6 +256,7 @@ reject "reject: team job not in team" "has no job 'tester'" "" team pair T3 --pe
 # 13. AXI: driver brief names gh-axi, navigator brief has no AXI line, a missing tool warns and does not fail
 brief_of() { cat "$HOME/.herdr/crew/$S/$1.brief" 2>/dev/null || true; }
 reset
+retire_fake_task T7
 out=$(echo "axi check" | "$CREW" launch driver - 2>&1)
 drv=$(brief_of "$S-t7-driver"); nav=$(brief_of "$S-t7-navigator")
 in_out "axi: driver brief lists gh-axi" "AXI tools (prefer these over raw CLIs; run with no args for a dashboard, follow help[] hints): gh-axi" "$drv"
@@ -258,6 +265,7 @@ in_out "axi: driver brief lists gh-axi" "AXI tools (prefer these over raw CLIs; 
 NOAXI="$TMP/noaxi"; mkdir -p "$NOAXI"
 ( IFS=:; for d in $PATH; do for f in "$d"/*; do b=${f##*/}; case "$b" in *-axi) ;; *) ln -s "$f" "$NOAXI/$b" 2>/dev/null || true ;; esac; done; done )
 reset
+retire_fake_task T7
 rc=0; out=$(echo "axi missing" | env PATH="$NOAXI" "$CREW" launch driver - 2>&1) || rc=$?
 in_out "axi missing: warns" "warning: AXI tool 'gh-axi' not on PATH" "$out"
 in_out "axi missing: launch still creates the task" "created task T7" "$out"
@@ -273,6 +281,7 @@ terminal_id=""
 for term_file in "$STATE"/term.*; do
   if jq -e --arg space "$space_id" '.labels["herdr.space"] == $space' "$term_file" >/dev/null 2>&1; then terminal_id=${term_file##*/term.}; fi
 done
+retire_fake_task T7
 out=$(env -u CREW_WS HC_TERMINAL_ID="$terminal_id" "$CREW" team pair T7 "do it" 2>&1)
 json_log --arg space "$space_id" -e 'any(.[]; .[0:3] == ["herdr-app","do","tab.new"] and (index("--space") as $i | .[$i+1] == $space))' >/dev/null \
   && pass "team fallback: app tab uses terminal label space" || flunk "team fallback: wrong app space"
@@ -282,12 +291,14 @@ panes_ok "team fallback: every pane carries the resolved CREW_WS"
 
 # 16. launch sets the new task to ready after tsk add
 reset
+retire_fake_task T7
 out=$(echo "mark ready" | "$CREW" launch driver - 2>&1)
 in_log "launch: task set to ready" "tsk status T7 ready"
 [[ $(grep -n 'tsk add' "$LOG" | cut -d: -f1) -lt $(grep -n 'tsk status T7 ready' "$LOG" | cut -d: -f1) ]] && pass "launch: ready comes after tsk add" || flunk "launch: ready before tsk add"
 
 # 17. autonomous completion: review re-runs reuse the worktree, prompts carry the review loop
 reset; mkdir -p "$HOME/.herdr/worktrees/$S/T7-review"
+retire_fake_task T7
 out=$(BRANCH_EXISTS=1 "$CREW" team review T7 "again" 2>&1)
 in_log "review reuse: checkout --detach of crew/T7-pair in the existing worktree" "checkout --detach crew/T7-pair"
 [[ $(cnt 'worktree add --detach') == 0 ]] && pass "review reuse: no new worktree add" || flunk "review reuse: added a worktree"
@@ -323,6 +334,7 @@ out=$(hook "$CTXDIR/missing.jsonl" s404 | CREW_SLUG=$S "$GUARD"); rc=$?
 
 # App-created agents retain their saved context hooks and native arguments.
 reset
+retire_fake_task T7
 out=$(echo "budget check" | "$CREW" launch driver - 2>&1)
 in_out "budget: app argv passes --settings" "--settings" "$(app_argv_text)"
 in_out "budget: settings register a saved context hook" ".context-limit." "$(app_argv_text)"
@@ -410,10 +422,12 @@ rm -f "$STATE/shell"
 
 # 21. Existing branches are attached; retained worktrees are reused.
 reset
+retire_fake_task T7
 out=$(BRANCH_EXISTS=1 "$CREW" team pair T7 "reuse branch" 2>&1)
 in_log "pair branch: attached without -b" "worktree add $HOME/.herdr/worktrees/$S/T7-pair crew/T7-pair"
 mkdir -p "$HOME/.herdr/worktrees/$S/T7-pair"
 reset
+retire_fake_task T7
 out=$(BRANCH_EXISTS=1 "$CREW" team pair T7 "reuse worktree" 2>&1)
 [[ $(cnt 'worktree add') == 0 ]] && pass "pair worktree: retained" || flunk "pair worktree: added again"
 rmdir "$HOME/.herdr/worktrees/$S/T7-pair"
@@ -428,13 +442,18 @@ hc_log -e --arg term "$paste_term" 'any(.[]; . == ["hc","keys",$term,"enter"])' 
   && pass "paste: extra Enter after visible text" || flunk "paste: missing Enter retry"
 hc_log -e --arg term "$paste_term" '[.[] | select(.[0:3] == ["hc","send",$term])] | length == 1' >/dev/null \
   && pass "paste: submitted once" || flunk "paste: duplicate prompt"
-reset; touch "$STATE/ambiguous" "$STATE/quick-done"
-out=$("$CREW" team pair T7 "brief awaits readiness" 2>&1)
-[[ $(hc_log '[.[] | select(.[0:2] == ["hc","send"])] | length') == 2 ]] && pass "first app briefs use hc send" || flunk "first app briefs did not use hc send"
-rm -f "$STATE/ambiguous" "$STATE/quick-done"
+reset; retire_fake_task T7; touch "$STATE/ambiguous"
+rc=0; out=$("$CREW" team pair T7 "ambiguous input" 2>&1) || rc=$?
+[[ $rc != 0 && $(hc_log '[.[] | select(.[0:2] == ["hc","send"])] | length') == 1 && $(hc_log '[.[] | select(.[0:2] == ["hc","keys"])] | length') == 0 ]] && pass "ambiguous paste: not resent" || flunk "ambiguous paste: resent or accepted"
+rm "$STATE/ambiguous"
+reset; retire_fake_task T7; touch "$STATE/quick-done"
+rc=0; out=$("$CREW" team pair T7 "quick completion" 2>&1) || rc=$?
+[[ $rc == 0 && "$out" != *"did not start"* && $(hc_log '[.[] | select(.[0:2] == ["hc","send"])] | length') == 2 ]] && pass "quick completion: accepted once" || flunk "quick completion: retried or warned"
+rm "$STATE/quick-done"
 
 # 23. SessionStart restores exports in a fresh Claude shell environment.
 reset
+retire_fake_task T7
 out=$("$CREW" team pair T7 "resume env" 2>&1)
 app_settings >"$STATE/settings.json"
 hook_cmd=$(jq -r '.hooks.SessionStart[0].hooks[0].command // empty' "$STATE/settings.json")
@@ -448,6 +467,7 @@ space_id=$(jq -r '.id' "$STATE/space")
 
 # 24. UI domain attaches to existing jobs and reaches both generated briefs.
 reset
+retire_fake_task T7
 rc=0; out=$("$CREW" team pair T7 --persona driver=ui-expert --persona navigator=ui-expert "Clean up the settings UI" 2>&1) || rc=$?
 (( rc == 0 )) && pass "ui domain: pair launches" || flunk "ui domain: rc=$rc ($out)"
 for ui_job in driver navigator; do
@@ -457,6 +477,7 @@ for ui_job in driver navigator; do
   in_out "ui domain: $ui_job has browser tool" "chrome-devtools-axi" "$ui_brief"
 done
 reset
+retire_fake_task T7
 rc=0; out=$(BRANCH_EXISTS=1 "$CREW" team review T7 --persona code-reviewer=ui-expert "Review the settings UI" 2>&1) || rc=$?
 (( rc == 0 )) && pass "ui domain: review launches" || flunk "ui domain: review rc=$rc ($out)"
 in_out "ui domain: reviewer receives persona" "Persona (ui-expert):" "$(brief_of "$S-t7-code-reviewer")"
@@ -465,6 +486,7 @@ in_out "ui domain: reviewer receives persona" "Persona (ui-expert):" "$(brief_of
 questions=$'Q1. Does login exist?\nQ2. How does login reach storage?'
 for spec in investigator inspector@investigator; do
   reset
+  retire_fake_task T7
   rc=0; out=$(printf '%s\n' "$questions" | "$CREW" launch "$spec" - 2>&1) || rc=$?
   (( rc == 0 )) && pass "investigate $spec: launches" || flunk "investigate $spec: rc=$rc ($out)"
   if (( rc == 0 )); then
@@ -481,6 +503,7 @@ for spec in investigator inspector@investigator; do
   fi
 done
 reset
+retire_fake_task T7
 rc=0; out=$("$CREW" team investigate T7 --persona investigator=nestjs-expert "$questions" 2>&1) || rc=$?
 (( rc == 0 )) && pass "investigate team: launches" || flunk "investigate team: rc=$rc ($out)"
 if (( rc == 0 )); then
@@ -495,6 +518,7 @@ reject "investigate: wrong rank refused before mutations" "is a inspector job" "
 plan_request=$'Plan a safe restart fix.\nExplain failure before implementation.'
 for spec in planner member@planner; do
   reset
+  retire_fake_task T7
   rc=0; out=$(printf '%s\n' "$plan_request" | "$CREW" launch "$spec" - 2>&1) || rc=$?
   (( rc == 0 )) && pass "plan $spec: launches" || flunk "plan $spec: rc=$rc ($out)"
   if (( rc == 0 )); then
@@ -512,6 +536,7 @@ for spec in planner member@planner; do
   fi
 done
 reset
+retire_fake_task T7
 rc=0; out=$("$CREW" team plan T7 "$plan_request" 2>&1) || rc=$?
 (( rc == 0 )) && pass "plan team: existing task" || flunk "plan team: rc=$rc ($out)"
 [[ $(cnt 'tsk add') == 0 ]] && pass "plan team: no duplicate task" || flunk "plan team: duplicate task"
@@ -763,6 +788,8 @@ rc=0; out=$("$CREW" completion 2>&1) || rc=$?
     pair_tab=$("$CLOSE_FAKE/herdr-app" ls | jq -r --arg s "$close_space" '.spaces[] | select(.id == $s) | .tabs[0].id')
     "$CLOSE_FAKE/herdr-app" do tab.rename --id "$pair_tab" --name "T7 pair · close-fixture-t7-driver: tests pass" >/dev/null
     renamed_tab=$("$CLOSE_FAKE/herdr-app" do tab.new --space "$close_space" --name "T7 pair · close-fixture-t7-navigator: nav ok" --folder "$TMP" --argv "$cargv" | jq -r '.tab')
+    exact_tab=$("$CLOSE_FAKE/herdr-app" do tab.new --space "$close_space" --name "T7 pair" --folder "$TMP" --argv "$cargv" | jq -r '.tab')
+    similar_tab=$("$CLOSE_FAKE/herdr-app" do tab.new --space "$close_space" --name "T7 pair-extra" --folder "$TMP" --argv "$cargv" | jq -r '.tab')
     t70_tab=$("$CLOSE_FAKE/herdr-app" do tab.new --space "$close_space" --name "T70 pair" --folder "$TMP" --argv "$cargv" | jq -r '.tab')
     review_tab=$("$CLOSE_FAKE/herdr-app" do tab.new --space "$close_space" --name "T7 review" --folder "$TMP" --argv "$cargv" | jq -r '.tab')
   }
@@ -772,16 +799,16 @@ rc=0; out=$("$CREW" completion 2>&1) || rc=$?
   : >"$CLOSE_LOG"
   rc=0; out=$(close_crew T7 pair 2>&1) || rc=$?
   (( rc == 0 )) && pass "close team: succeeds" || flunk "close team: rc=$rc ($out)"
-  jq -s -e --arg a "$pair_tab" --arg b "$renamed_tab" --arg c "$review_tab" '
+  jq -s -e --arg a "$pair_tab" --arg b "$renamed_tab" --arg c "$exact_tab" '
     [.[] | select(.[0:3] == ["herdr-app","do","tab.close"]) | .[4]] | sort == ([$a,$b,$c] | sort)' "$CLOSE_LOG" >/dev/null \
-    && pass "close team: prefix closes pair, renamed pair and review by ID" || flunk "close team: wrong tabs ($(cat "$CLOSE_LOG"))"
+    && pass "close team: closes only pair and renamed pair" || flunk "close team: wrong tabs ($(cat "$CLOSE_LOG"))"
   in_out "close team: keeps the worktree output" "git -C $REPO worktree remove $CLOSE_HOME/.herdr/worktrees/close-fixture/T7-pair" "$out"
   close_fixture
   : >"$CLOSE_LOG"
   rc=0; out=$(close_crew T7 2>&1) || rc=$?
   (( rc == 0 )) && pass "close task: succeeds" || flunk "close task: rc=$rc ($out)"
-  jq -s -e --arg a "$pair_tab" --arg b "$renamed_tab" --arg c "$review_tab" --arg d "$t70_tab" '
-    ([.[] | select(.[0:3] == ["herdr-app","do","tab.close"]) | .[4]] | sort) == ([$a,$b,$c] | sort) and
+  jq -s -e --arg a "$pair_tab" --arg b "$renamed_tab" --arg c "$review_tab" --arg d "$t70_tab" --arg e "$exact_tab" --arg f "$similar_tab" '
+    ([.[] | select(.[0:3] == ["herdr-app","do","tab.close"]) | .[4]] | sort) == ([$a,$b,$c,$e,$f] | sort) and
     ([.[] | select(.[0:3] == ["herdr-app","do","tab.close"]) | .[4]] | index($d)) == null' "$CLOSE_LOG" >/dev/null \
     && pass "close task: prefix match leaves T70" || flunk "close task: closed the wrong tabs"
   : >"$CLOSE_LOG"

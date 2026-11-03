@@ -46,6 +46,9 @@ fails=0
 check() { if "$@"; then printf 'PASS: %s\n' "$label"; else printf 'FAIL: %s (rc=%s; %s)\n' "$label" "$rc" "$out"; fails=$((fails+1)); fi; }
 run() { : > "$LOG"; rc=0; out=$("$CREW" "$@" 2>&1) || rc=$?; }
 app_log() { sed -n '/^\["herdr-app"/p' "$LOG" | jq -s "$@"; }
+policy_from_command() {
+  /bin/bash -c 'eval "set -- $1"; while (( $# )); do case "$1" in OPENCODE_CONFIG_CONTENT=*) printf "%s\n" "${1#OPENCODE_CONFIG_CONTENT=}"; exit 0 ;; --agents) shift; printf "%s\n" "$1"; exit 0 ;; esac; shift; done; exit 1' _ "$1"
+}
 registered_and_sent() {
   local name=$1 meta="$HOME/.herdr/crew/fixture/$1.meta" terminal
   [[ -s "$meta" && -s "$HOME/.herdr/crew/fixture/$name.brief" && -s "$HOME/.herdr/crew/fixture/$name.definition" ]] || return 1
@@ -61,12 +64,16 @@ run team payments T7 'inspect payments'
 check claude_policy
 label='agent registration saves snapshots and sends its first brief'
 check registered_and_sent fixture-t7-payments-reviewer
+original_claude_policy=$(app_log -r '[.[] | select(.[0:2] == ["herdr-app","do"] and (index("--argv") != null)) | .[-1] | fromjson | . as $a | ($a | index("--agents")) as $i | select($i != null) | $a[$i+1] | fromjson][0]')
 printf '%s\n' 'CUSTOM PAYMENT REVIEW CHANGED' > "$CREW_REPO/.herdr-crew/agents/payments-reviewer/AGENTS.md"
 label='Claude restart keeps original inspector definition'
 restart_term=$(sed -n 's/^terminal=//p' "$HOME/.herdr/crew/fixture/fixture-t7-payments-reviewer.meta")
 printf 'working\nnull\nworking\nworking\nworking\n' >"$STATE/get-seq.$restart_term"
 run restart fixture-t7-payments-reviewer
 check bash -c '[[ "$1" == 0 ]] && rg -q "CUSTOM PAYMENT REVIEW ORIGINAL" "$2" && ! rg -q "CUSTOM PAYMENT REVIEW CHANGED" "$2"' _ "$rc" "$HOME/.herdr/crew/fixture/fixture-t7-payments-reviewer.definition"
+restart_command=$(jq -sr --arg term "$restart_term" '[.[] | select(.[0:3] == ["hc","send",$term] and .[3] != "/exit") | .[3]][0]' "$LOG")
+restart_policy=$(policy_from_command "$restart_command")
+label='Claude restart sends original native policy'; check jq -ne --argjson a "$original_claude_policy" --argjson b "$restart_policy" '$a == $b'
 cp "$HOME/.herdr/crew/fixture/fixture-t7-payments-reviewer.definition" "$TMP/saved-definition" 2>/dev/null || :
 rm -f "$HOME/.herdr/crew/fixture/fixture-t7-payments-reviewer.definition"
 label='restart refuses missing snapshot before stopping the agent'
@@ -93,6 +100,7 @@ label='OpenCode project inspector has selected guidance and native deny policy'
 run team payments T9 'inspect payments'
 app_log > "$TMP/app-log.json"
 check bash -c '[[ "$1" == 0 ]] && jq -e '\''[.[] | select(.[0] == "herdr-app" and .[1] == "do" and (.[2] == "space.new" or .[2] == "tab.new" or .[2] == "pane.split")) | . as $call | ($call|index("--argv")) as $i | ($call[$i+1]|fromjson)[] | select(startswith("OPENCODE_CONFIG_CONTENT=")) | sub("^OPENCODE_CONFIG_CONTENT=";"") | fromjson | .agents.crew | select((.system | contains("CUSTOM PAYMENT REVIEW ORIGINAL")) and .permissions[0] == {action:"*",resource:"*",effect:"deny"} and (any(.permissions[]; .action == "edit" and .effect == "allow")|not) and (any(.permissions[]; .action == "subagent" and .effect == "allow")|not))] | length > 0'\'' "$2" >/dev/null' _ "$rc" "$TMP/app-log.json"
+original_opencode_policy=$(jq -r '[.[] | select(.[0:2] == ["herdr-app","do"] and (index("--argv") != null)) | .[-1] | fromjson | .[] | select(startswith("OPENCODE_CONFIG_CONTENT=")) | sub("^OPENCODE_CONFIG_CONTENT=";"") | fromjson][0]' "$TMP/app-log.json")
 # Restart must use the saved definition and native policy, not edited files.
 printf '%s\n' 'CUSTOM PAYMENT REVIEW CHANGED' > "$CREW_REPO/.herdr-crew/agents/payments-reviewer/AGENTS.md"
 label='restart retains original inspector guidance and native policy after project edit'
@@ -100,6 +108,9 @@ restart_term=$(sed -n 's/^terminal=//p' "$HOME/.herdr/crew/fixture/fixture-t9-pa
 printf 'working\nnull\nworking\nworking\nworking\n' >"$STATE/get-seq.$restart_term"
 run restart fixture-t9-payments-reviewer
 check bash -c '[[ "$1" == 0 ]] && grep -q "CUSTOM PAYMENT REVIEW ORIGINAL" "$HOME/.herdr/crew/fixture/fixture-t9-payments-reviewer.definition" && ! grep -q "CUSTOM PAYMENT REVIEW CHANGED" "$2"' _ "$rc" "$LOG"
+restart_command=$(jq -sr --arg term "$restart_term" '[.[] | select(.[0:3] == ["hc","send",$term] and .[3] != "/exit") | .[3]][0]' "$LOG")
+restart_policy=$(policy_from_command "$restart_command")
+label='OpenCode restart sends original native policy'; check jq -ne --argjson a "$original_opencode_policy" --argjson b "$restart_policy" '$a == $b'
 label='fresh launch uses changed project inspector guidance'
 run team payments T10 'inspect payments again'
 app_log > "$TMP/fresh-app-log.json"

@@ -211,6 +211,10 @@ export HERDR_ENV=1 CREW_WS=w1 CREW_SLUG=config-fixture CREW_REPO="$PROJECT"
 export PANE_ENV_DIR="$TEMP_ROOT/panes"
 mkdir -p "$PANE_ENV_DIR"
 launch() { rc=0; out=$("$CREW" "$@" 2>&1) || rc=$?; }
+policy_from_command() {
+  /bin/bash -c 'eval "set -- $1"; while (( $# )); do case "$1" in OPENCODE_CONFIG_CONTENT=*) printf "%s\n" "${1#OPENCODE_CONFIG_CONTENT=}"; exit 0 ;; --agents) shift; printf "%s\n" "$1"; exit 0 ;; esac; shift; done; exit 1' _ "$1"
+}
+
 run driver opencode --model provider/model --effort high
 : >"$LOG"
 launch team pair T7 'mixed team'
@@ -220,6 +224,7 @@ expect 'mixed team launches configured driver with standalone OpenCode' '[[ $rc 
 expect 'unconfigured navigator keeps Claude native rank settings' 'jq -e '\''any(.[]; index("crew-inspector") != null and index("--settings") != null)'\'' <<<"$argvs" >/dev/null'
 policy=$(jq -r '[.[][] | select(startswith("OPENCODE_CONFIG_CONTENT=")) | sub("^OPENCODE_CONFIG_CONTENT=";"") | fromjson][0] // {}' <<<"$argvs")
 expect 'OpenCode receives provider model and member native edit permission' 'jq -e '\''.model == "provider/model" and .agents.crew.model == "provider/model#high" and (.agents.crew.permissions|length > 0) and any(.agents.crew.permissions[]?; .action == "edit" and .effect == "allow")'\'' <<<"$policy" >/dev/null'
+original_policy=$policy
 # Model the documented whole-value wildcards, trailing " *" bare-command match,
 # and last-match precedence: https://opencode.ai/v2/docs/permissions/#matching
 shell_effect() {
@@ -239,6 +244,8 @@ for command in 'git status' 'git diff --stat' 'git -C repo status' 'git -C repo 
   expect "member policy allows: $command" '[[ $(shell_effect "$command") == allow ]]'
 done
 expect 'OpenCode brief includes native role guidance without claiming a context hook' '[[ $(cat "$HOME/.herdr/crew/config-fixture/config-fixture-t7-driver.brief") == *"OpenCode runtime"* && $(cat "$HOME/.herdr/crew/config-fixture/config-fixture-t7-driver.brief") != *"A hook warns you"* ]]'
+driver_term=$(sed -n 's/^terminal=//p' "$HOME/.herdr/crew/config-fixture/config-fixture-t7-driver.meta")
+expect 'OpenCode guidance is actually sent to driver' 'jq -se --arg term "$driver_term" '\''any(.[]; .[0:3] == ["hc","send",$term] and (.[3] | contains("OpenCode runtime")))'\'' "$LOG" >/dev/null'
 run driver claude --model changed
 : >"$LOG"
 restart_term=$(sed -n 's/^terminal=//p' "$HOME/.herdr/crew/config-fixture/config-fixture-t7-driver.meta")
@@ -247,6 +254,9 @@ printf 'working\nnull\nworking\nworking\nworking\n' >"$STATE/get-seq.$restart_te
 launch restart config-fixture-t7-driver
 expect 'restart pins original provider and model across config edits' '[[ $rc == 0 ]] && jq -se --arg term "$restart_term" --arg command "$saved_cmd" '\''any(.[]; . == ["hc","send",$term,$command])'\'' "$LOG" >/dev/null'
 expect 'restart restores original provider model and effort variant' '[[ "$saved_cmd" == *provider/model* && "$saved_cmd" == *high* ]]'
+restart_command=$(jq -sr --arg term "$restart_term" '[.[] | select(.[0:3] == ["hc","send",$term] and .[3] != "/exit") | .[3]][0]' "$LOG")
+restart_policy=$(policy_from_command "$restart_command")
+expect 'restart sends exact original effective policy' 'jq -ne --argjson a "$original_policy" --argjson b "$restart_policy" '\''$a == $b and $b.model == "provider/model" and $b.agents.crew.model == "provider/model#high"'\'' >/dev/null'
 run inspector opencode --model provider/reviewer
 : >"$LOG"
 launch team investigate T8 'read only'

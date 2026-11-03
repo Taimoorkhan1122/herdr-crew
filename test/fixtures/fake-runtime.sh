@@ -80,6 +80,11 @@ case "$command" in
       jq '.status = null | .turn = ((.turn // 0) + 1)' "$STATE/term.$terminal" >"$STATE/term.$terminal.tmp"
       mv "$STATE/term.$terminal.tmp" "$STATE/term.$terminal"
       printf '%s\n' 'fixture shell %' >"$STATE/screen.$terminal"
+    elif [[ -f "$STATE/ambiguous" ]]; then
+      printf '%s\n' 'unrelated screen' >"$STATE/screen.$terminal"
+    elif [[ -f "$STATE/quick-done" ]]; then
+      jq '.status = "done" | .turn = ((.turn // 0) + 1)' "$STATE/term.$terminal" >"$STATE/term.$terminal.tmp"
+      mv "$STATE/term.$terminal.tmp" "$STATE/term.$terminal"
     elif [[ $(jq -r '.swallow // false' "$STATE/term.$terminal") == true ]]; then
       printf '%s\n' "$message" >"$STATE/screen.$terminal"
     elif [[ $(jq -r '.keepTurn // false' "$STATE/term.$terminal") == true ]]; then
@@ -289,4 +294,17 @@ esac
 SH
 
   chmod +x "$fake/hc" "$fake/herdr-app" "$fake/sleep"
+}
+
+# Model an earlier team leaving its terminals before a subsequent launch.
+retire_fake_task() {
+  local task=$1 file terminal
+  for file in "$HOME"/.herdr/crew/*/*.meta; do
+    [[ -f "$file" ]] || continue
+    grep -qxF "task=$task" "$file" || continue
+    terminal=$(sed -n 's/^terminal=//p' "$file" | head -1)
+    [[ -f "$STATE/term.$terminal" ]] || continue
+    jq '.state = "finished"' "$STATE/term.$terminal" >"$STATE/term.$terminal.tmp"
+    mv "$STATE/term.$terminal.tmp" "$STATE/term.$terminal"
+  done
 }

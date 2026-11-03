@@ -322,6 +322,7 @@ submit_term() {
     info=$(hc get "$terminal" --json 2>/dev/null || true)
     status=$(jq -r '.status.state // empty' <<<"$info" 2>/dev/null || true)
     turn=$(jq -r '.turn // empty' <<<"$info" 2>/dev/null || true)
+    if [[ "$status" == blocked ]]; then SUBMIT_BLOCKED=1; crew_warn "$name is blocked; needs a person"; return 1; fi
     if [[ "$status" == working ]] || { [[ "$turn" =~ ^[0-9]+$ && "$before_turn" =~ ^[0-9]+$ ]] && (( turn > before_turn )); }; then
       return 0
     fi
@@ -333,6 +334,7 @@ submit_term() {
     info=$(hc get "$terminal" --json 2>/dev/null || true)
     status=$(jq -r '.status.state // empty' <<<"$info" 2>/dev/null || true)
     turn=$(jq -r '.turn // empty' <<<"$info" 2>/dev/null || true)
+    if [[ "$status" == blocked ]]; then SUBMIT_BLOCKED=1; crew_warn "$name is blocked; needs a person"; return 1; fi
     if [[ "$status" == working ]] || { [[ "$turn" =~ ^[0-9]+$ && "$before_turn" =~ ^[0-9]+$ ]] && (( turn > before_turn )); }; then
       return 0
     fi
@@ -399,13 +401,13 @@ register_agent() {
     else crew_warn "$name did not become ready; check terminal $terminal"; fi
     return 1
   fi
+  submit_term "$terminal" "$name" "$brief_text" || return $?
   mkdir -p "$SDIR" || die "cannot create crew state directory"
   mv "$SDIR/$name.cmd.pending" "$SDIR/$name.cmd" || die "cannot save agent command for $name"
   printf 'rank=%s\njob=%s\nspace=%s\ntab=%s\nterminal=%s\npane=%s\nlabel=%s\ntask=%s\nselection=%s\ncoordinator=%s\ncontext_hook=%s\ncompletion_hook=%s\n' \
     "$rank" "$job" "$space" "$tab" "$terminal" "$pane" "$label" "$task" "$selection" "$coordinator" "$context_hook" "$completion_hook" >"$SDIR/$name.meta"
   printf '%s\n' "$brief_text" >"$SDIR/$name.brief"
   printf '%s\n' "$definition" >"$SDIR/$name.definition"
-  submit_term "$terminal" "$name" "$brief_text"
 }
 
 # start_agent NAME RANK SPACE TAB TERM PANE LABEL TASK BRIEF JOB SELECTION DEFINITION CONTEXT_HOOK COMPLETION_HOOK
@@ -473,7 +475,8 @@ cmd_launch() {
     manager_argv=$(app_argv_json)
     split_pane "$root" right "$manager_argv"
     manager_pane=$NEW_PANE; manager_term=$NEW_TERM; manager_tab=$lead_tab
-    ARGV=(tsk); board_argv=$(app_argv_json)
+    set_env "$SLUG-board" "" ""
+    ARGV=(env "${ENVV[@]}" tsk); board_argv=$(app_argv_json)
     split_pane "$root" down "$board_argv"
     start_agent "$manager" manager "$WS" "$manager_tab" "$manager_term" "$manager_pane" "$label" "" "$(brief "$manager" manager "" "$lead" \
       "Wait for the lead to send you task numbers (T#) via herdr-crew say. Then spawn teams: herdr-crew team <team> <T#> [--persona <job>=<domain>]... Domain personas: $(persona_names). Never edit code." \
@@ -520,10 +523,24 @@ cmd_team() {
   done
   preflight_team "$team"
   members=$(conf "$team" members); wt=$(conf "$team" worktree)
+  if [[ "$wt" == pair-branch ]]; then branch_exists "crew/$T-pair" || die "no branch crew/$T-pair: run 'team pair $T' first"; fi
+  local saved_meta saved_terminal saved_info saved_state
+  for saved_meta in "$SDIR"/*.meta; do
+    [[ -f "$saved_meta" ]] || continue
+    grep -qxF "task=$T" "$saved_meta" || continue
+    saved_terminal=$(sed -n 's/^terminal=//p' "$saved_meta" | head -1)
+    [[ -n "$saved_terminal" ]] || continue
+    if saved_info=$(hc get "$saved_terminal" --json 2>/dev/null); then
+      saved_state=$(jq -r '.state // empty' <<<"$saved_info")
+      [[ "$saved_state" == finished ]] || die "$T already running; use say or restart"
+    else
+      saved_state=$?
+      [[ "$saved_state" == 3 ]] || die "cannot verify terminal $saved_terminal for $T (hc get exit $saved_state)"
+    fi
+  done
   [[ -n "$instr" ]] || instr=$(tsk list "$T" --json 2>/dev/null | jq -r '.[0].notes // ""' 2>/dev/null || true)
   [[ -n "$instr" ]] || instr="(read the task: tsk list $T --json)"
   cwd="$REPO"; path="$HOME/.herdr/worktrees/$SLUG/$T-$team"
-  if [[ "$wt" == pair-branch ]]; then branch_exists "crew/$T-pair" || die "no branch crew/$T-pair: run 'team pair $T' first"; fi
   resolve_space
   case "$wt" in
     new|from-pair)
@@ -690,15 +707,18 @@ cmd_status() {
 }
 
 cmd_close() {
-  local T=$1 TEAM=${2:-} label space tabs tab d listing
+  local T=$1 TEAM=${2:-} label space tabs tab d listing info
+  [[ "$T" =~ ^T[0-9]+$ ]] || die "invalid task '$T'"
   space=${CREW_WS:-${HERDR_WORKSPACE_ID:-}}
+  if [[ -z "$space" && -n "${HC_TERMINAL_ID:-}" ]] && info=$(hc get "$HC_TERMINAL_ID" --json 2>/dev/null); then
+    space=$(jq -r '.labels["herdr.space"] // empty' <<<"$info")
+  fi
   [[ -n "$space" ]] || die "no workspace known: run close inside Herdr, or set CREW_WS"
   label="$T ..."; [[ -z "$TEAM" ]] || label="$T $TEAM"
-  # Prefix matching also catches tabs renamed by mark; the trailing space keeps T70 distinct from T7.
   listing=$(herdr-app ls) || die "cannot list herdr-app spaces"
-  tabs=$(jq -r --arg s "$space" --arg p "$T " '.spaces[]
+  tabs=$(jq -r --arg s "$space" --arg p "$T " --arg l "$T $TEAM" --arg team "$TEAM" '.spaces[]
     | select(.id == $s) | .tabs[]
-    | select((.name // "") | startswith($p))
+    | select((.name // "") as $n | if $team == "" then ($n | startswith($p)) else ($n == $l or ($n | startswith($l + " · "))) end)
     | .id' <<<"$listing") || die "cannot read herdr-app tabs"
   [[ -n "$tabs" ]] || die "no tab labelled '$label'"
   for tab in $tabs; do mut herdr-app do tab.close --id "$tab" --confirmed true; done
@@ -823,6 +843,12 @@ restart_one() {
   [[ -f "$SDIR/$name.definition" && ! -L "$SDIR/$name.definition" ]] || die "missing saved definition; relaunch the team"
   definition=$(cat "$SDIR/$name.definition") || die "cannot read saved definition; relaunch the team"
   jq -se --arg rank "$rank" --arg id "${job:-crew-$rank}" 'length == 1 and (.[0] | type == "object" and .id == $id and .profile == $rank and (.description | type == "string") and (.profileInstructions | type == "string") and (.instructions | type == "string") and (.tools | type == "array" and all(.[]; type == "string")) and (if has("disallowedTools") then .disallowedTools | type == "array" and all(.[]; type == "string") else true end))' <<<"$definition" >/dev/null 2>&1 || die "invalid saved definition; relaunch the team"
+
+  if [[ -n "${CREW_DRY_RUN:-}" ]]; then
+    mut hc send "$terminal" /exit
+    mut hc send "$terminal" "$(cat "$cmd")"
+    return 0
+  fi
 
   # A normal agent exit leaves the wrapper shell at a prompt. Sending /exit there would close the pane.
   wait_shell "$terminal" 0 || rc=$?
