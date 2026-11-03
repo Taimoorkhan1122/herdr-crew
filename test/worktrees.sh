@@ -4,22 +4,16 @@ set -euo pipefail
 CREW="$(cd "$(dirname "$0")/.." && pwd)/bin/crew"
 TEMP_ROOT=$(mktemp -d)
 trap 'rm -rf "$TEMP_ROOT"' EXIT
-mkdir -p "$TEMP_ROOT/fake" "$TEMP_ROOT/home" "$TEMP_ROOT/repo"
-cat >"$TEMP_ROOT/fake/herdr" <<'FAKE'
-#!/usr/bin/env bash
-case "$1 $2" in
-  'agent get') exit 1 ;;
-  'tab create') echo '{"result":{"root_pane":{"pane_id":"w1:p1"}}}' ;;
-  'pane split') echo '{"result":{"pane":{"pane_id":"w1:p2"}}}' ;;
-  'agent start'|'agent prompt'|'agent wait') exit 0 ;;
-  *) echo "unexpected herdr command: $*" >&2; exit 1 ;;
-esac
-FAKE
+mkdir -p "$TEMP_ROOT/fake" "$TEMP_ROOT/home" "$TEMP_ROOT/repo" "$TEMP_ROOT/state"
+LOG="$TEMP_ROOT/log"; : >"$LOG"; export LOG STATE="$TEMP_ROOT/state"
 cat >"$TEMP_ROOT/fake/tsk" <<'FAKE'
 #!/usr/bin/env bash
 echo '[{"number":7,"notes":"worktree regression"}]'
 FAKE
 printf '#!/usr/bin/env bash\nexit 0\n' >"$TEMP_ROOT/fake/claude"
+source "$(cd "$(dirname "$0")/.." && pwd)/test/fixtures/fake-runtime.sh"
+install_fake_runtime "$TEMP_ROOT/fake" "$TEMP_ROOT/state"
+touch "$TEMP_ROOT/state/auto-ready"
 chmod +x "$TEMP_ROOT/fake/"*
 export PATH="$TEMP_ROOT/fake:$PATH" HOME="$TEMP_ROOT/home" HERDR_ENV=1 CREW_WS=w1
 export CREW_REPO="$TEMP_ROOT/repo" CREW_SLUG=fixture
@@ -31,10 +25,13 @@ git -C "$CREW_REPO" branch crew/T7-pair
 worktree="$HOME/.herdr/worktrees/fixture/T7-pair"
 [[ "$(git -C "$worktree" symbolic-ref --short HEAD)" == crew/T7-pair ]]
 printf '%s\n' 'keep this work' >"$worktree/uncommitted.txt"
+retire_fake_task T7
 "$CREW" team pair T7 >"$TEMP_ROOT/output" 2>&1
 [[ "$(cat "$worktree/uncommitted.txt")" == 'keep this work' ]]
 echo 'PASS: existing pair branch attaches and retained worktree keeps edits'
+retire_fake_task T7
 "$CREW" team test T7 >"$TEMP_ROOT/output" 2>&1
+retire_fake_task T7
 "$CREW" team test T7 >"$TEMP_ROOT/output" 2>&1
 [[ "$(git -C "$HOME/.herdr/worktrees/fixture/T7-test" symbolic-ref --short HEAD)" == crew/T7-test ]]
 echo 'PASS: test team creates and reuses its branch worktree'

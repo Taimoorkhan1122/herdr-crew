@@ -1,6 +1,6 @@
 # 0007. The launcher answers the workspace trust prompt only for panes it starts
 
-- Status: Accepted
+- Status: Superseded in part by 0025 (trust-dialog detection through readiness)
 - Date: 2026-10-13
 
 ## Context

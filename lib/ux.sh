@@ -1,5 +1,5 @@
 # Sourced by bin/crew before any dependency check, so `--help` and `--version`
-# work on a machine without tsk, herdr or jq.
+# work on a machine without tsk, hc, herdr-app or jq.
 # Colour and symbols decorate output only. Every word a test or a script matches
 # stays exactly as it was, and colour is off when stdout is not a terminal.
 
@@ -46,6 +46,8 @@ ${U_BLD}COMMANDS${U_OFF}
   ${U_BLU}launch${U_OFF}      Start a crew, or a job persona with a new task and its team
   ${U_BLU}team${U_OFF}        Start the team of an existing task
   ${U_BLU}say${U_OFF}         Send a message to a running agent
+  ${U_BLU}read${U_OFF}        Read an agent's terminal output
+  ${U_BLU}wait${U_OFF}        Wait on an agent's terminal
   ${U_BLU}mark${U_OFF}        Record a task status change and a note
   ${U_BLU}status${U_OFF}      Show task states and crew agent states
   ${U_BLU}close${U_OFF}       Close a task's tabs (worktrees are kept)
@@ -58,7 +60,7 @@ ${U_BLD}COMMANDS${U_OFF}
 ${U_BLD}GLOBAL OPTIONS${U_OFF}
   ${U_GRN}-h${U_OFF}, ${U_GRN}--help${U_OFF}       Show this help and exit
   ${U_GRN}-V${U_OFF}, ${U_GRN}--version${U_OFF}    Show the version and exit
-      ${U_GRN}--dry-run${U_OFF}    Print every mutating herdr, tsk and git call instead of running it
+      ${U_GRN}--dry-run${U_OFF}    Print every mutating hc, herdr-app, tsk and git call instead of running it
 
   ${U_DIM}Global options come before the command, so instructions can never look like one.
   CREW_DRY_RUN=1 in the environment does the same as --dry-run.${U_OFF}
@@ -199,6 +201,26 @@ EXAMPLES
 EOF
 }
 
+usage_read() {
+  cat <<'EOF'
+USAGE
+  herdr-crew read <agent> [--lines N]
+
+DESCRIPTION
+  Reads the saved terminal for an agent. Options pass through to hc read.
+EOF
+}
+
+usage_wait() {
+  cat <<'EOF'
+USAGE
+  herdr-crew wait <agent> [--timeout S]
+
+DESCRIPTION
+  Waits on the saved terminal for an agent. Options pass through to hc wait.
+EOF
+}
+
 usage_mark() {
   cat <<'EOF'
 USAGE
@@ -323,7 +345,7 @@ cmd_completion() {
 _herdr_crew() {
   local cur commands
   cur="${COMP_WORDS[COMP_CWORD]}"
-  commands="init upgrade configure launch team say mark status close watch handoff restart completion help"
+  commands="init upgrade configure launch team say read wait mark status close watch handoff restart completion help"
   if (( COMP_CWORD == 1 )); then
     COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
   else
@@ -338,7 +360,7 @@ EOF
 # zsh completion for herdr-crew. Source it from a directory on your fpath.
 _herdr_crew() {
   local -a commands
-  commands=(init upgrade configure launch team say mark status close watch handoff restart completion help)
+  commands=(init upgrade configure launch team say read wait mark status close watch handoff restart completion help)
   _describe -t commands 'herdr-crew command' commands
 }
 _herdr_crew "$@"

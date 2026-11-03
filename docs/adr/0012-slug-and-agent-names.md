@@ -1,6 +1,6 @@
 # 0012. Each repo gets a slug from its name and path, and agents get predictable names
 
-- Status: Accepted
+- Status: Superseded in part by 0025 (agent lookup uses saved terminal IDs)
 - Date: 2026-10-13
 
 ## Context

@@ -14,7 +14,7 @@ These files record how herdr-crew got built, why it is built the way it is, and 
 - `../reports/Herdr core and app migration.md`: migration research for `herdr-core` and `herdr-app`, with the Option A recommendation.
 - `../research_notes/Herdr core and app migration/validation-spikes-2026-11-02.md`: observed core and app behavior behind that report.
 - `superpowers/plans/2026-10-29-project-agent-baseline.md`: regression-first implementation plan and execution handoff; implementation and evaluations have not run.
-- `superpowers/plans/2026-11-02-herdr-core-app-migration.md`: regression-first plan for the runtime replacement; implementation has not started.
+- `superpowers/plans/2026-11-02-herdr-core-app-migration.md`: regression-first plan for the runtime replacement; implemented on branch `feat/herdr-core-app-runtime`, not merged.
 - `PROGRESS.md`: a dated log of each change session, newest first.
 - `maintainability-review-2026-10-14.md`: independent KISS review findings and proposed focused fixes; not implemented.
 - `adr/`: architecture decision records (ADRs). Each file records one decision, its context, and its consequences.
@@ -31,5 +31,5 @@ Follow `../AGENTS.md` for the checkpoint fields and update triggers. The coordin
 - After each change session, add a dated line to the top of `PROGRESS.md`. Put the newest session first.
 - When the status of anything changes, update `STATE.md`. Move items between "What works", "Only dry-run tested", and "Open issues" as needed.
 - For each decision, add a new numbered ADR. Copy `adr/0000-template.md`, use the next free number, and use a short slug in the file name, such as `0013-some-decision.md`.
-- Never edit an accepted ADR. If a decision changes, write a new ADR that supersedes the old one. Then set the old ADR's status to `Superseded by NNNN`. That status line is the only edit allowed on an old ADR.
+- Never edit an accepted ADR. If a decision changes, write a new ADR that supersedes the old one. Set the old ADR's status to `Superseded by NNNN`; when only part changes, use `Superseded in part by NNNN (scope)`. That status line is the only edit allowed on an old ADR.
 - Keep the docs in plain English with full sentences.

@@ -13,7 +13,9 @@ git -C "$PROJECT" -c user.name=Fixture -c user.email=fixture@example.invalid com
 git -C "$TEMP_ROOT/other" init -q
 # Runtime calls are forbidden during configure, even if these binaries are installed.
 export LOG="$TEMP_ROOT/runtime.log"
-for tool in herdr tsk claude; do
+source "$(cd "$(dirname "$0")/.." && pwd)/test/fixtures/fake-runtime.sh"
+install_fake_runtime "$TEMP_ROOT/fake" "$TEMP_ROOT/state"
+for tool in hc herdr-app tsk claude; do
   cat >"$TEMP_ROOT/fake/$tool" <<'SH'
 #!/usr/bin/env bash
 echo "$*" >>"$LOG"
@@ -186,32 +188,8 @@ expect 'changing OpenCode model clears variants inherited from another model' '[
 # Runtime adapter tests: capture each argument exactly, not shell-flattened text.
 rm .herdr-crew.json
 printf '%s\n' '{"version":1,"roles":{}}' >.herdr-crew.json
-cat >"$TEMP_ROOT/fake/herdr" <<'SH'
-#!/usr/bin/env bash
-jq -nc --args '$ARGS.positional' -- "$@" >>"$LOG"
-case "$1 $2" in
-  'tab create'|'pane split')
-    pane=p1; [[ "$1" != pane ]] || pane=p2
-    jq -nc --args '$ARGS.positional' -- "$@" >"$PANE_ENV_DIR/$pane"
-    ;;
-  'agent start')
-    pane=p1
-    for ((i=1; i <= $#; i++)); do
-      if [[ "${!i}" == --pane ]]; then i=$((i+1)); pane=${!i}; pane=${pane##*:}; break; fi
-    done
-    if [[ -f "$PANE_ENV_DIR/$pane" ]]; then
-      policy=$(jq -c '[.[]|select(startswith("OPENCODE_CONFIG_CONTENT="))|sub("^OPENCODE_CONFIG_CONTENT=";"")|fromjson][0] // {}' "$PANE_ENV_DIR/$pane")
-      jq -nc --arg name "$3" --argjson policy "$policy" '["effective-policy",$name,$policy]' >>"$LOG"
-    fi ;;
-esac
-case "$1 $2" in
-  'agent get') exit 1 ;;
-  'tab create') echo '{"result":{"root_pane":{"pane_id":"w1:p1"}}}' ;;
-  'pane split') echo '{"result":{"pane":{"pane_id":"w1:p2"}}}' ;;
-  'pane process-info') echo '{"result":{"process_info":{"foreground_process_group_id":1,"shell_pid":1}}}' ;;
-  *) exit 0 ;;
-esac
-SH
+install_fake_runtime "$TEMP_ROOT/fake" "$TEMP_ROOT/state"
+touch "$STATE/auto-ready"
 cat >"$TEMP_ROOT/fake/tsk" <<'SH'
 #!/usr/bin/env bash
 jq -nc --args '$ARGS.positional' -- "tsk" "$@" >>"$LOG"
@@ -233,13 +211,20 @@ export HERDR_ENV=1 CREW_WS=w1 CREW_SLUG=config-fixture CREW_REPO="$PROJECT"
 export PANE_ENV_DIR="$TEMP_ROOT/panes"
 mkdir -p "$PANE_ENV_DIR"
 launch() { rc=0; out=$("$CREW" "$@" 2>&1) || rc=$?; }
+policy_from_command() {
+  /bin/bash -c 'eval "set -- $1"; while (( $# )); do case "$1" in OPENCODE_CONFIG_CONTENT=*) printf "%s\n" "${1#OPENCODE_CONFIG_CONTENT=}"; exit 0 ;; --agents) shift; printf "%s\n" "$1"; exit 0 ;; esac; shift; done; exit 1' _ "$1"
+}
+
 run driver opencode --model provider/model --effort high
 : >"$LOG"
 launch team pair T7 'mixed team'
-expect 'mixed team launches configured driver with standalone OpenCode' '[[ $rc == 0 ]] && jq -se '\''any(.[]; .[0:3] == ["agent","start","config-fixture-t7-driver"] and (index("opencode") != null) and (index("--standalone") != null))'\'' "$LOG" >/dev/null'
-expect 'unconfigured navigator keeps Claude native rank settings' 'jq -se '\''any(.[]; .[0:3] == ["agent","start","config-fixture-t7-navigator"] and (index("crew-inspector") != null) and (index("--settings") != null))'\'' "$LOG" >/dev/null'
-policy=$(jq -rs '[.[][] | select(type == "string") | select(startswith("OPENCODE_CONFIG_CONTENT=")) | sub("^OPENCODE_CONFIG_CONTENT=";"") | fromjson][0] // {}' "$LOG")
+app_argvs() { jq -sr '[.[] | select(.[0:2] == ["herdr-app","do"] and (index("--argv") != null)) | . as $call | ($call | index("--argv")) as $i | $call[$i+1] | fromjson] ' "$LOG"; }
+argvs=$(app_argvs)
+expect 'mixed team launches configured driver with standalone OpenCode' '[[ $rc == 0 ]] && jq -e '\''any(.[]; index("opencode") != null and index("--standalone") != null)'\'' <<<"$argvs" >/dev/null'
+expect 'unconfigured navigator keeps Claude native rank settings' 'jq -e '\''any(.[]; index("crew-inspector") != null and index("--settings") != null)'\'' <<<"$argvs" >/dev/null'
+policy=$(jq -r '[.[][] | select(startswith("OPENCODE_CONFIG_CONTENT=")) | sub("^OPENCODE_CONFIG_CONTENT=";"") | fromjson][0] // {}' <<<"$argvs")
 expect 'OpenCode receives provider model and member native edit permission' 'jq -e '\''.model == "provider/model" and .agents.crew.model == "provider/model#high" and (.agents.crew.permissions|length > 0) and any(.agents.crew.permissions[]?; .action == "edit" and .effect == "allow")'\'' <<<"$policy" >/dev/null'
+original_policy=$policy
 # Model the documented whole-value wildcards, trailing " *" bare-command match,
 # and last-match precedence: https://opencode.ai/v2/docs/permissions/#matching
 shell_effect() {
@@ -258,21 +243,29 @@ done
 for command in 'git status' 'git diff --stat' 'git -C repo status' 'git -C repo diff' 'git add file' 'git commit -m change' 'printf hello'; do
   expect "member policy allows: $command" '[[ $(shell_effect "$command") == allow ]]'
 done
-expect 'OpenCode brief includes native role guidance without claiming a context hook' 'jq -se '\''any(.[]; .[0:3] == ["agent","prompt","config-fixture-t7-driver"] and (.[3]|contains("OpenCode runtime")) and (.[3]|contains("A hook warns you")|not))'\'' "$LOG" >/dev/null'
+expect 'OpenCode brief includes native role guidance without claiming a context hook' '[[ $(cat "$HOME/.herdr/crew/config-fixture/config-fixture-t7-driver.brief") == *"OpenCode runtime"* && $(cat "$HOME/.herdr/crew/config-fixture/config-fixture-t7-driver.brief") != *"A hook warns you"* ]]'
+driver_term=$(sed -n 's/^terminal=//p' "$HOME/.herdr/crew/config-fixture/config-fixture-t7-driver.meta")
+expect 'OpenCode guidance is actually sent to driver' 'jq -se --arg term "$driver_term" '\''any(.[]; .[0:3] == ["hc","send",$term] and (.[3] | contains("OpenCode runtime")))'\'' "$LOG" >/dev/null'
 run driver claude --model changed
 : >"$LOG"
+restart_term=$(sed -n 's/^terminal=//p' "$HOME/.herdr/crew/config-fixture/config-fixture-t7-driver.meta")
+saved_cmd=$(cat "$HOME/.herdr/crew/config-fixture/config-fixture-t7-driver.cmd")
+printf 'working\nnull\nworking\nworking\nworking\n' >"$STATE/get-seq.$restart_term"
 launch restart config-fixture-t7-driver
-expect 'restart pins original provider and model across config edits' '[[ $rc == 0 ]] && jq -se '\''any(.[]; .[0:3] == ["agent","start","config-fixture-t7-driver"] and (index("opencode") != null))'\'' "$LOG" >/dev/null'
-policy=$(jq -cs '[.[]|select(.[0] == "effective-policy" and .[1] == "config-fixture-t7-driver")|.[2]][0] // {}' "$LOG")
-expect 'restart restores original provider model and effort variant' 'jq -e '\''.model == "provider/model" and .agents.crew.model == "provider/model#high"'\'' <<<"$policy" >/dev/null'
+expect 'restart pins original provider and model across config edits' '[[ $rc == 0 ]] && jq -se --arg term "$restart_term" --arg command "$saved_cmd" '\''any(.[]; . == ["hc","send",$term,$command])'\'' "$LOG" >/dev/null'
+expect 'restart restores original provider model and effort variant' '[[ "$saved_cmd" == *provider/model* && "$saved_cmd" == *high* ]]'
+restart_command=$(jq -sr --arg term "$restart_term" '[.[] | select(.[0:3] == ["hc","send",$term] and .[3] != "/exit") | .[3]][0]' "$LOG")
+restart_policy=$(policy_from_command "$restart_command")
+expect 'restart sends exact original effective policy' 'jq -ne --argjson a "$original_policy" --argjson b "$restart_policy" '\''$a == $b and $b.model == "provider/model" and $b.agents.crew.model == "provider/model#high"'\'' >/dev/null'
 run inspector opencode --model provider/reviewer
 : >"$LOG"
 launch team investigate T8 'read only'
-policy=$(jq -rs '[.[][] | select(type == "string") | select(startswith("OPENCODE_CONFIG_CONTENT=")) | sub("^OPENCODE_CONFIG_CONTENT=";"") | fromjson][0] // {}' "$LOG")
+argvs=$(app_argvs)
+policy=$(jq -r '[.[][] | select(startswith("OPENCODE_CONFIG_CONTENT=")) | sub("^OPENCODE_CONFIG_CONTENT=";"") | fromjson][0] // {}' <<<"$argvs")
 expect 'read-only OpenCode policy denies unknown tools and allows rank commands' '[[ $rc == 0 ]] && jq -e '\''.agents.crew.permissions[0] == {action:"*",resource:"*",effect:"deny"} and any(.agents.crew.permissions[]; .action == "shell" and .resource == "tsk list *" and .effect == "allow") and (any(.agents.crew.permissions[]; .action == "edit" and .effect == "allow")|not) and (any(.agents.crew.permissions[]; .action == "subagent" and .effect == "allow")|not)'\'' <<<"$policy" >/dev/null'
 : >"$LOG"
 launch team lead T11 'rank-only team'
-if [[ $rc == 0 ]] && jq -se 'any(.[]; .[0:3] == ["agent","start","config-fixture-t11-lead"])' "$LOG" >/dev/null; then
+if [[ $rc == 0 ]] && jq -se 'any(.[]; .[0:3] == ["herdr-app","do","tab.new"] and (.[-1] | contains("config-fixture-t11-lead")))' "$LOG" >/dev/null; then
   pass 'rank-only team slots preflight without inventing job personas'
 else fail "rank-only team slots preflight (rc=$rc, output: $out)"; fi
 cat >"$TEMP_ROOT/fake/opencode" <<'SH'
@@ -281,10 +274,10 @@ echo 1.9.0
 SH
 : >"$LOG"
 launch team pair T9 'must not start'
-expect 'unsupported OpenCode version fails before any team mutation' '[[ $rc != 0 && "$out" == *"OpenCode 2"* ]] && ! jq -se '\''any(.[]; .[0:2] == ["tab","create"] or .[0:2] == ["agent","start"])'\'' "$LOG" >/dev/null && [[ ! -e "$HOME/.herdr/worktrees/config-fixture/T9-pair" ]]'
+expect 'unsupported OpenCode version fails before any team mutation' '[[ $rc != 0 && "$out" == *"OpenCode 2"* ]] && ! jq -se '\''any(.[]; .[0:3] == ["herdr-app","do","tab.new"] or .[0:3] == ["herdr-app","do","space.new"])'\'' "$LOG" >/dev/null && [[ ! -e "$HOME/.herdr/worktrees/config-fixture/T9-pair" ]]'
 # A missing runtime in a later team slot must not leave a driver or worktree behind.
 mkdir -p "$TEMP_ROOT/no-agent"
-for tool in herdr tsk claude; do ln -s "$TEMP_ROOT/fake/$tool" "$TEMP_ROOT/no-agent/$tool"; done
+for tool in hc herdr-app tsk claude; do ln -s "$TEMP_ROOT/fake/$tool" "$TEMP_ROOT/no-agent/$tool"; done
 ln -s "$(command -v jq)" "$TEMP_ROOT/no-agent/jq"
 : >"$LOG"
 rc=0
