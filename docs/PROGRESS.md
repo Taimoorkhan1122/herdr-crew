@@ -4,6 +4,7 @@ Newest entries first. Each entry gives the date and what changed.
 
 ## 2026-11-03
 
+- Pushed `feat/herdr-core-app-runtime` at e9ad478 and opened PR #8, stacked on the research branch. No merge, installation or live acceptance.
 - Completed the `herdr-core` and `herdr-app` migration on `feat/herdr-core-app-runtime` at 5785de0. Tasks 1-6 cover the shared runtime fixture, app-owned topology with explicit `env` argv, readiness and trust handling, `hc`-backed messaging and status, same-terminal restart and tab close, fixture cutover and documentation. Codex reviewed the whole branch at eb18dd8 and found six runtime blockers, weakened coverage and stale docs; 41f4622 and 5785de0 fix them. The coordinator reran nine suites, all exit 0; `git diff --check` exited 0; no legacy `herdr` command call remains. No push, merge or live acceptance.
 
 ## 2026-11-02

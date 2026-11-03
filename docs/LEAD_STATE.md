@@ -2,7 +2,7 @@
 
 ## Active checkpoint: herdr-core and herdr-app migration implemented on a local branch
 
-Updated: 2026-11-03 20:15 PKT (Asia/Karachi). Implementation branch `feat/herdr-core-app-runtime` is at 5785de0 in a linked worktree; the tree is clean. The research branch `docs/herdr-core-app-migration-research` is pushed at 42a8f5f and PR #7 is open at https://github.com/Taimoorkhan1122/herdr-crew/pull/7. No implementation push, merge, installation or live launch is authorized.
+Updated: 2026-11-03 20:25 PKT (Asia/Karachi). Implementation branch `feat/herdr-core-app-runtime` is pushed at e9ad478. PR #8 is open at https://github.com/Taimoorkhan1122/herdr-crew/pull/8 and is stacked on the research branch. The research branch `docs/herdr-core-app-migration-research` is pushed at 42a8f5f and PR #7 is open at https://github.com/Taimoorkhan1122/herdr-crew/pull/7. No merge, installation or live launch is authorized.
 
 Objective and scope: replace legacy `herdr` with `herdr-core` (`hc`) plus the required `herdr-app`. The user approved ADR 0025 and the six-task plan, approved the research push, chose subagent-driven execution, then directed the remaining work to the Codex pane. Full automated verification passed on the branch.
 
@@ -12,7 +12,7 @@ Evidence: the coordinator ran `test/review-regressions.sh`, `test/dry-run.sh`, `
 
 Limits: all runtime checks use fakes plus real Git in disposable repositories. No live app or agent acceptance, installation, push or merge. Remaining live gaps: app restart with live terminals, pane title behavior, split ratio, headless use, and a real permission-blocked agent.
 
-Next: 1) Review the local branch and decide whether to push it. 2) Push only with explicit authorization. 3) Merge only with explicit approval. 4) Run a live acceptance crew only with separate authorization. The ledger is `.superpowers/sdd/2026-11-02-herdr-core-app-migration/progress.md`.
+Next: 1) Review PR #7 and PR #8. 2) Merge only with explicit approval; merge PR #7 first, then PR #8. 3) Run a live acceptance crew only with separate authorization. The ledger is `.superpowers/sdd/2026-11-02-herdr-core-app-migration/progress.md`.
 
 ## Historical checkpoint: validation spikes passed; research updated, PR #7 open
 
