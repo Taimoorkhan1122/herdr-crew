@@ -31,5 +31,5 @@ Follow `../AGENTS.md` for the checkpoint fields and update triggers. The coordin
 - After each change session, add a dated line to the top of `PROGRESS.md`. Put the newest session first.
 - When the status of anything changes, update `STATE.md`. Move items between "What works", "Only dry-run tested", and "Open issues" as needed.
 - For each decision, add a new numbered ADR. Copy `adr/0000-template.md`, use the next free number, and use a short slug in the file name, such as `0013-some-decision.md`.
-- Never edit an accepted ADR. If a decision changes, write a new ADR that supersedes the old one. Then set the old ADR's status to `Superseded by NNNN`. That status line is the only edit allowed on an old ADR.
+- Never edit an accepted ADR. If a decision changes, write a new ADR that supersedes the old one. Set the old ADR's status to `Superseded by NNNN`; when only part changes, use `Superseded in part by NNNN (scope)`. That status line is the only edit allowed on an old ADR.
 - Keep the docs in plain English with full sentences.

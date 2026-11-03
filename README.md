@@ -155,7 +155,7 @@ Open a terminal in the Herdr desktop app, change into your repo, and invoke the 
 
 Then this happens:
 
-1. The launcher finds your repo with `git` and uses the app space you are in, or reuses the `crew-<slug>` space.
+1. The launcher finds your repo with `git`, then selects the space from `CREW_WS`, the caller app terminal's `herdr.space` label, or the `crew-<slug>` fallback outside an app terminal.
 2. It opens a tab named `crew <slug>` with the Lead, the Manager, and the board. The tab opens in the background, so switch to it yourself.
 3. The Lead reads your request, may ask you a question in its pane, creates tasks on the board, and marks them `ready`.
 4. The Lead sends the task numbers to the Manager, which opens a tab for each task.
@@ -222,7 +222,7 @@ herdr-crew team pair T12 --persona driver=nestjs-expert --persona navigator=secu
 
 The part before `=` is the job, and the part after `=` is the domain persona. Stack several with `+`.
 
-`team` finds its space the same way `launch` does. In a crew terminal it uses that terminal's space. Otherwise it reuses the `crew-<slug>` space, or creates it, as described in "Workspace and tab selection".
+`team` resolves its space in this order: the `CREW_WS` value, the `herdr.space` label on the caller's app terminal, then the `crew-<slug>` space. The `crew-<slug>` fallback applies outside an app terminal. If that space does not exist, the launcher creates it.
 
 ### Check status
 
@@ -239,7 +239,7 @@ herdr-crew close T12
 herdr-crew close T12 review
 ```
 
-Without a team, this closes the tabs whose names start with `T12 `, such as `T12 pair`, and never a tab named `T120`. With a team, it closes only that tab, such as `T12 review`. It resolves each tab by its label, then closes the tab by ID. It keeps the worktrees and prints the command to remove each one, such as `git -C <repo> worktree remove <path>`. It never runs that command itself.
+Without a team, this closes tabs whose labels start with `T12 `; it never closes a tab named `T120`. With a team, it closes tabs whose labels start with `T12 <team>`. For example, `close T12 review` also closes a renamed tab such as `T12 review · driver: done`. It resolves each tab by its label, then closes the tab by ID. It keeps the worktrees and prints the command to remove each one, such as `git -C <repo> worktree remove <path>`. It never runs that command itself.
 
 ### Watch the board
 
@@ -271,8 +271,8 @@ Merging is always your decision. Crew instructions require approval before a pus
 
 ### Workspace and tab selection
 
-- In a crew terminal, the crew uses that terminal's app space.
-- Otherwise the launcher reuses a live space named `crew-<slug>`. It creates the space with its first real tab on the first run.
+- The launcher first uses `CREW_WS`, then the `herdr.space` label on the caller's app terminal.
+- Outside an app terminal, it falls back to a live space named `crew-<slug>`. It creates that space with its first real tab on the first run if needed.
 - Without a running app window, runtime commands stop with a clear error. Headless use on a server, container or CI runner is unsupported.
 
 ### Typical session
@@ -311,7 +311,7 @@ herdr-crew launch investigator - <<'EOF'
 EOF
 ```
 
-Run this inside a crew terminal. Read the resulting answers with `tsk list T<n> --json`, using the task number printed by the launcher. Without a running Manager, the task stays at `review` for manual acceptance. It does not claim `done` automatically. You can also ask the Manager to run `herdr-crew team investigate T<n> --persona investigator=nestjs-expert` for a backend investigation.
+Run this inside an app terminal. Read the resulting answers with `tsk list T<n> --json`, using the task number printed by the launcher. Without a running Manager, the task stays at `review` for manual acceptance. It does not claim `done` automatically. You can also ask the Manager to run `herdr-crew team investigate T<n> --persona investigator=nestjs-expert` for a backend investigation.
 
 A separate investigator costs another agent session and coordination. Quick facts stay with the existing helper path. Investigation closes after its answers are accepted; it is not a permanently running project index.
 
@@ -372,13 +372,13 @@ Every command explains itself. `herdr-crew help` lists them, `herdr-crew help <c
 | Command | What it does |
 |---|---|
 | `herdr-crew launch <spec> -` | Starts a crew (`lead`), or a new task with its team (a job spec). Instructions come on stdin, or as words after the spec. Needs the app. |
-| `herdr-crew team <team> <T#> [--persona <job>=<domain>[+<domain>]]... ["instructions"]` | Starts a team for an existing task. Optional instructions override the task notes for the brief. Reuses the crew space, or creates `crew-<slug>`. |
-| `herdr-crew say <agent> "<message>"` | Sends when the agent is idle or done. For a working agent it waits 20 seconds, then sends if the agent is idle or done. A blocked, still-working or missing recipient gets one queued `[msg from X to Y]` task step when it has a task; otherwise the command warns that the message was not delivered. A busy recipient never fails the command, and a blocked send is never forced. |
+| `herdr-crew team <team> <T#> [--persona <job>=<domain>[+<domain>]]... ["instructions"]` | Starts a team for an existing task. Optional instructions override the task notes for the brief. Uses `CREW_WS`, then the caller app terminal's `herdr.space` label, then `crew-<slug>` outside an app terminal. |
+| `herdr-crew say <agent> "<message>"` | Sends when the agent is idle or done. For a working agent it waits 20 seconds, then sends if the agent is idle or done. A blocked, still-working or no-terminal recipient gets one queued `[msg from X to Y]` task step when its saved task exists; otherwise the command warns that the message was not delivered. An unknown agent only gets a warning. A busy recipient never fails the command, and a blocked send is never forced. |
 | `herdr-crew read <agent> [--lines N]` | Reads the saved terminal for an agent. Options pass through to `hc read`. |
 | `herdr-crew wait <agent> [--timeout S]` | Waits on the saved terminal for an agent. Options pass through to `hc wait`. |
 | `herdr-crew mark <T#> <status> "<note>"` | Sets the task status, adds the note as a step, and renames the saved tab to `<label> · <agent>: <note>`. The label keeps its `T# TEAM` prefix. |
 | `herdr-crew status [--json]` | Prints one line per open task (T number, status, title) and one per crew agent (name, state), tab separated. States come from the saved terminals. `--json` prints the raw task list for scripts. |
-| `herdr-crew close <T#> [<team>]` | Closes all matching task tabs, or one team's tab, by tab label and ID. Keeps worktrees and prints removal commands for existing paths. |
+| `herdr-crew close <T#> [<team>]` | Closes tabs by label prefix and tab ID. Without a team, matches `T# ` and never `T70`; with a team, matches `T# <team>`, including renamed labels such as `T7 pair · driver: note`. Keeps worktrees and prints removal commands for existing paths. |
 | `herdr-crew watch` | Prints one line per board change: task status, a crew agent that became `blocked` or `done` or disappeared, and each new handoff. The Lead runs it with Monitor. Press Ctrl+C to stop. |
 | `herdr-crew handoff "<status>"` | Saves the handoff body from stdin, adds a step to the task, and tells the agent that restarts this one. Run by the agent itself. |
 | `herdr-crew restart <agent or T#>` | Sends `/exit`, waits for a shell prompt or a null status, then sends the saved agent command and brief in the same terminal. Never creates a tab. A finished terminal fails; relaunch the team. A `T#` restarts every agent of that task. |

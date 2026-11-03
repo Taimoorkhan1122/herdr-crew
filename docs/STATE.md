@@ -92,7 +92,7 @@ These results were collected on the legacy `herdr` runtime. None has been repeat
 - The Lead monitor (ADR 0015). `herdr-crew watch` polls the board every 20 seconds and prints one line per change. The Lead runs it with the Monitor tool. Dry-run checks cover task changes and unchanged-task silence. A board Monitor started during live Q&A; independent agent/handoff wake-up coverage remains pending.
 - The context budget (ADR 0015). `bin/ctx-guard` warns each agent once at 135K tokens, and the launcher registers it with `--settings`. `handoff` writes the handoff file, and `restart` starts the agent again from its saved brief. Dry-run checks cover the hook output, the once-per-session marker, the settings flag, the handoff and restart flow. Live threshold crossing and a full handoff/resume cycle remain unverified.
 - Launching a review spec (`code-reviewer`) is refused before any `tsk`, `herdr`, or `git` call. Before this fix it created an orphan task.
-- `team` outside a crew terminal resolves the app space from `CREW_WS`, then the `herdr.space` label of the caller terminal, then `crew-<slug>`. Before this fix it stopped with `no workspace known`.
+- `team` resolves its app space from `CREW_WS`, then the `herdr.space` label of the caller's app terminal, then `crew-<slug>` outside an app terminal. Before this fix it stopped with `no workspace known`.
 - `launch` sets a new task to `ready` after `tsk add`. Before this fix it stayed `open`.
 - The AXI tools: the `axi:` lines reach the brief, and a missing tool prints a warning. The Manager ran `quota-axi --no-credential-refresh` during live Q&A. The Lead's own Lavish review flow remains unverified; direct Lavish use by the implementing agent is separate evidence.
 - The `nestjs-expert` persona now lists the two Supabase skills. Their source is `supabase/agent-skills`, added to `skills.sources`.
@@ -110,15 +110,15 @@ These results were collected on the legacy `herdr` runtime. None has been repeat
 4. Startup can print a warning without proving whether a prompt was delivered. The Q&A Manager needed manual brief delivery after inspection. The recovery paths have hermetic coverage; startup reliability remains open.
 5. Low priority: the navigator and test allowlists (now widened), a half-dead crew after a rebuild, and resuming a crew after `close`.
 
-## Gotchas learned
+## Gotchas learned (legacy herdr runtime unless noted)
 
-- `herdr pane split` does not inherit `--env` from `tab create`. Every pane needs its own `--env` values.
+- [Legacy herdr only] `herdr pane split` does not inherit `--env` from `tab create`. Every pane needs its own `--env` values.
 - Claude's workspace trust dialog defaults to "No, exit". The launcher sends Down and then Enter.
 - A big bracketed paste can lose its final Enter, or land during SessionStart hook output. `submit` handles both cases.
 - An agent's `tools:` list must include `Skill`, or it cannot load skills.
 - The bare `caveman` skill in `~/.agents` is broken for `ultra` and `off`. It points to a missing `ultracave` skill. Use `caveman:caveman`.
 - 93 entries in `~/.claude/skills` are broken links. 90 of them point into `~/.gemini/skills`.
-- `herdr agent list` shows `name` only for named agents. `herdr agent get` returns the state at `.result.agent.agent_status`.
+- [Legacy herdr only] `herdr agent list` shows `name` only for named agents. `herdr agent get` returns the state at `.result.agent.agent_status`.
 - A user PreToolUse hook blocks some test-runner strings in Bash commands.
 - Claude Code's auto-mode classifier once blocked an agent prompt as "Instruction Poisoning". The prompt told the agent to ignore hook reminders. It was rephrased and the user approved the change.
 
