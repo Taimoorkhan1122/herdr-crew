@@ -223,6 +223,16 @@ pane_for_terminal() {
 
 app_argv_json() { jq -nc --args '$ARGS.positional' -- "${ARGV[@]}"; }
 
+# save_cmd NAME: exact argv as one shell line, so restart types the same model, effort and policy bytes.
+save_cmd() {
+  local name=$1 arg line=""
+  for arg in "${ARGV[@]}"; do
+    printf -v arg '%q' "$arg"
+    line+="${line:+ }$arg"
+  done
+  printf '%s\n' "$line" >"$SDIR/$name.cmd" || die "cannot save agent command for $name"
+}
+
 create_space() {
   local result
   result=$(mutj '{"space":"sp-dry","tab":"tb-dry","terminal":"t-dry","pane":"p-dry"}' \
@@ -356,6 +366,7 @@ agent_argv() {
   if [[ "$AGENT_KIND" == opencode ]]; then
     ARGV=(env "${ENVV[@]}" opencode --standalone)
     AGENT_CONTEXT_HOOK=""
+    [[ -n "${CREW_DRY_RUN:-}" ]] || save_cmd "$name"
     return 0
   fi
   native=$(jq -c --arg name "crew-$rank" '{($name): ({description:.description, prompt:(.profileInstructions + (if .id == ("crew-" + .profile) then "" else "\n\n" + .instructions end)), tools:(.tools // []), disallowedTools:(.disallowedTools // [])} + (if .permissionMode then {permissionMode:.permissionMode} else {} end))}' <<<"$definition")
@@ -371,6 +382,7 @@ agent_argv() {
   [[ -n "$model" && "$model" != inherit ]] && ARGV+=(--model "$model")
   [[ -n "$effort" ]] && ARGV+=(--effort "$effort")
   ARGV+=(--settings "$settings")
+  [[ -n "${CREW_DRY_RUN:-}" ]] || save_cmd "$name"
 }
 
 # register_agent NAME RANK SPACE TAB TERM PANE LABEL TASK BRIEF JOB SELECTION DEFINITION CONTEXT_HOOK COMPLETION_HOOK
@@ -676,15 +688,18 @@ cmd_status() {
 }
 
 cmd_close() {
-  local T=$1 TEAM=${2:-} label tabs tab d
-  [[ -n "${CREW_WS:-${HERDR_WORKSPACE_ID:-}}" ]] || die "no workspace known: run close inside Herdr, or set CREW_WS"
+  local T=$1 TEAM=${2:-} label space tabs tab d listing
+  space=${CREW_WS:-${HERDR_WORKSPACE_ID:-}}
+  [[ -n "$space" ]] || die "no workspace known: run close inside Herdr, or set CREW_WS"
   label="$T ..."; [[ -z "$TEAM" ]] || label="$T $TEAM"
-  # TEAM: exact tab label "T# TEAM". No TEAM: every tab starting with "T# "
-  tabs=$(herdr tab list --workspace "${CREW_WS:-${HERDR_WORKSPACE_ID:-}}" \
-    | jq -r --arg p "$T " --arg x "$TEAM" --arg l "$label" '.result.tabs[]
-      | select(if $x == "" then ((.label // "") | startswith($p)) else (.label // "") == $l end) | .tab_id')
+  # Prefix matching also catches tabs renamed by mark; the trailing space keeps T70 distinct from T7.
+  listing=$(herdr-app ls) || die "cannot list herdr-app spaces"
+  tabs=$(jq -r --arg s "$space" --arg p "$T " '.spaces[]
+    | select(.id == $s) | .tabs[]
+    | select((.name // "") | startswith($p))
+    | .id' <<<"$listing") || die "cannot read herdr-app tabs"
   [[ -n "$tabs" ]] || die "no tab labelled '$label'"
-  for tab in $tabs; do mut herdr tab close "$tab"; done
+  for tab in $tabs; do mut herdr-app do tab.close --id "$tab" --confirmed true; done
   crew_out "closed $T tabs. Worktree kept. Remove only after you confirm:"
   if [[ -n "$TEAM" ]]; then
     d="$HOME/.herdr/worktrees/$SLUG/$T-$TEAM"
@@ -775,55 +790,80 @@ cmd_handoff() {
   crew_out "handoff saved to $f"
 }
 
-# restart_one NAME: /exit the agent, wait for its pane to reach the shell, start it again from its saved meta and brief.
-# The brief gets a resume line when a handoff exists; keep that path readable.
+# wait_shell TERM TIMEOUT: wait for a null status and a visible shell prompt. 3 means the terminal is finished.
+wait_shell() {
+  local terminal=$1 timeout=$2 elapsed=0 info state status screen
+  while (( elapsed <= timeout )); do
+    info=$(hc get "$terminal" --json 2>/dev/null) || return 3
+    state=$(jq -r '.state // empty' <<<"$info" 2>/dev/null || true)
+    [[ "$state" != finished ]] || return 3
+    status=$(jq -r '.status.state // empty' <<<"$info" 2>/dev/null || true)
+    if [[ -z "$status" ]]; then
+      screen=$(hc read "$terminal" --lines 20 2>/dev/null || true)
+      if rg -q '[$#%❯] *$' <<<"$screen"; then return 0; fi
+    fi
+    (( elapsed < timeout )) || break
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  return 1
+}
+
+# restart_one NAME: reuse the saved terminal. Stop the agent, type the saved command into the wrapper shell,
+# wait for readiness, then submit the saved brief with the handoff line. Never creates a tab.
 restart_one() {
-  local name=$1 rank job pane task i ready="" pi handoff brief selection definition context_hook completion_hook space tab terminal label arg_index
+  local name=$1 terminal cmd rank job definition handoff brief rc=0
   terminal=$(terminal_of "$name") || die "no saved state for $name (start it with herdr-crew first)"
-  [[ -f "$SDIR/$name.brief" ]] || die "no saved state for $name (start it with herdr-crew first)"
+  [[ -f "$SDIR/$name.brief" && ! -L "$SDIR/$name.brief" ]] || die "no saved state for $name (start it with herdr-crew first)"
+  cmd="$SDIR/$name.cmd"
+  [[ -f "$cmd" && ! -L "$cmd" ]] || die "missing saved command for $name; relaunch the team"
   rank=$(sed -n 's/^rank=//p' "$SDIR/$name.meta"); job=$(sed -n 's/^job=//p' "$SDIR/$name.meta")
-  pane=$(sed -n 's/^pane=//p' "$SDIR/$name.meta"); task=$(sed -n 's/^task=//p' "$SDIR/$name.meta")
-  space=$(sed -n 's/^space=//p' "$SDIR/$name.meta"); tab=$(sed -n 's/^tab=//p' "$SDIR/$name.meta")
-  label=$(sed -n 's/^label=//p' "$SDIR/$name.meta")
-  selection=$(sed -n 's/^selection=//p' "$SDIR/$name.meta")
-  if [[ -n "$selection" ]]; then
-    # The pane retains its original environment, including the OpenCode session policy.
-    CONFIG_FILE="$SDIR/$name.meta"
-    config_validate "$(jq -nc --argjson s "$selection" '{version:1,roles:{member:($s|with_entries(select(.value != "")))}}')"
-    AGENT_JSON=$selection; selection_fields
-  else
-    config_load; agent_selection "$rank" "$job"; selection=$AGENT_JSON
-    [[ "$AGENT_KIND" == claude ]] || die "legacy OpenCode session has no native crew policy; relaunch the team instead of restarting"
-  fi
   [[ -f "$SDIR/$name.definition" && ! -L "$SDIR/$name.definition" ]] || die "missing saved definition; relaunch the team"
   definition=$(cat "$SDIR/$name.definition") || die "cannot read saved definition; relaunch the team"
-  context_hook=$(sed -n 's/^context_hook=//p' "$SDIR/$name.meta")
-  completion_hook=$(sed -n 's/^completion_hook=//p' "$SDIR/$name.meta")
   jq -se --arg rank "$rank" --arg id "${job:-crew-$rank}" 'length == 1 and (.[0] | type == "object" and .id == $id and .profile == $rank and (.description | type == "string") and (.profileInstructions | type == "string") and (.instructions | type == "string") and (.tools | type == "array" and all(.[]; type == "string")) and (if has("disallowedTools") then .disallowedTools | type == "array" and all(.[]; type == "string") else true end))' <<<"$definition" >/dev/null 2>&1 || die "invalid saved definition; relaunch the team"
-  agent_check
-  mut herdr agent prompt "$name" /exit >/dev/null || true
-  if [[ -z "${CREW_DRY_RUN:-}" ]]; then
-    for ((i = 0; i < 30; i++)); do
-      pi=$(herdr pane process-info --pane "$pane" 2>/dev/null || true)
-      if jq -e '.result.process_info | .foreground_process_group_id == .shell_pid' <<<"$pi" >/dev/null 2>&1; then ready=1; break; fi
-      sleep 1
-    done
-    [[ -n "$ready" ]] || die "$name pane $pane is still busy after 30s; try again later"
+
+  # A normal agent exit leaves the wrapper shell at a prompt. Sending /exit there would close the pane.
+  wait_shell "$terminal" 0 || rc=$?
+  case $rc in
+    0) ;;
+    3) die "$name: the agent's pane is gone; relaunch the team" ;;
+    *)
+      rc=0
+      hc send "$terminal" /exit >/dev/null 2>&1 || rc=$?
+      case $rc in
+        0) ;;
+        9) die "$name is blocked; needs a person" ;;
+        3) die "$name terminal $terminal is gone; relaunch the team" ;;
+        *) die "cannot send /exit to $name (hc send exit $rc)" ;;
+      esac
+      rc=0
+      wait_shell "$terminal" 30 || rc=$?
+      case $rc in
+        0) ;;
+        3) die "$name: the agent's pane is gone; relaunch the team" ;;
+        *) die "$name terminal $terminal is still busy after 30s; try again later" ;;
+      esac ;;
+  esac
+
+  rc=0
+  hc send "$terminal" "$(cat "$cmd")" >/dev/null 2>&1 || rc=$?
+  case $rc in
+    0) ;;
+    9) die "$name is blocked; needs a person" ;;
+    3) die "$name terminal $terminal is gone; relaunch the team" ;;
+    *) die "cannot start $name in terminal $terminal (hc send exit $rc)" ;;
+  esac
+  if wait_ready "$terminal" 30; then :; else
+    rc=$?
+    if (( rc == 1 )); then die "$name is blocked; needs a person"; fi
+    die "$name did not become ready; check terminal $terminal"
   fi
+
   handoff="$SDIR/handoff-$name.md"
   brief=$(sed '/^Resume from your handoff: /d' "$SDIR/$name.brief")  # drop the resume line of an earlier restart
   if [[ -f "$handoff" ]]; then brief="$brief"$'\n'"Resume from your handoff: $handoff. Read it first. The board and the handoff show work already done: do not redo it, and do not create tasks that already exist."; fi
-  load_definitions
-  agent_argv "$name" "$rank" "$task" "$job" "$selection" "$definition" "$context_hook" "$completion_hook"
-  if [[ "$AGENT_KIND" == opencode ]]; then
-    mut herdr agent start "$name" --pane "$pane" --timeout 120000 --kind opencode -- --standalone
-  else
-    arg_index=0
-    for ((i = 0; i < ${#ARGV[@]}; i++)); do [[ "${ARGV[$i]}" == claude ]] && { arg_index=$((i + 1)); break; }; done
-    mut herdr agent start "$name" --pane "$pane" --timeout 120000 --kind claude -- "${ARGV[@]:$arg_index}"
-  fi
-  start_agent "$name" "$rank" "$space" "$tab" "$terminal" "$pane" "$label" "$task" "$brief" "$job" "$selection" "$definition" "$context_hook" "$completion_hook"
-  # Keep the referenced handoff readable for the restarted agent.
+  printf '%s\n' "$brief" >"$SDIR/$name.brief" || die "cannot save the restart brief for $name"
+  submit_term "$terminal" "$name" "$brief" || die "$name did not accept the brief; check terminal $terminal"
   crew_out "restarted $name"
 }
 

@@ -4,7 +4,8 @@ set -euo pipefail
 CREW="$(cd "$(dirname "$0")/.." && pwd)/bin/crew"
 TEMP_ROOT=$(mktemp -d)
 trap 'rm -rf "$TEMP_ROOT"' EXIT
-mkdir -p "$TEMP_ROOT/fake" "$TEMP_ROOT/home" "$TEMP_ROOT/repo"
+mkdir -p "$TEMP_ROOT/fake" "$TEMP_ROOT/home" "$TEMP_ROOT/repo" "$TEMP_ROOT/state"
+LOG="$TEMP_ROOT/log"; : >"$LOG"; export LOG STATE="$TEMP_ROOT/state"
 cat >"$TEMP_ROOT/fake/herdr" <<'FAKE'
 #!/usr/bin/env bash
 case "$1 $2" in
@@ -20,6 +21,9 @@ cat >"$TEMP_ROOT/fake/tsk" <<'FAKE'
 echo '[{"number":7,"notes":"worktree regression"}]'
 FAKE
 printf '#!/usr/bin/env bash\nexit 0\n' >"$TEMP_ROOT/fake/claude"
+source "$(cd "$(dirname "$0")/.." && pwd)/test/fixtures/fake-runtime.sh"
+install_fake_runtime "$TEMP_ROOT/fake" "$TEMP_ROOT/state"
+touch "$TEMP_ROOT/state/auto-ready"
 chmod +x "$TEMP_ROOT/fake/"*
 export PATH="$TEMP_ROOT/fake:$PATH" HOME="$TEMP_ROOT/home" HERDR_ENV=1 CREW_WS=w1
 export CREW_REPO="$TEMP_ROOT/repo" CREW_SLUG=fixture

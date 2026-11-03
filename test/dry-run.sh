@@ -370,16 +370,12 @@ out=$(echo "mark ready" | "$CREW" launch driver - 2>&1)
 in_log "launch: task set to ready" "tsk status T7 ready"
 [[ $(grep -n 'tsk add' "$LOG" | cut -d: -f1) -lt $(grep -n 'tsk status T7 ready' "$LOG" | cut -d: -f1) ]] && pass "launch: ready comes after tsk add" || flunk "launch: ready before tsk add"
 
-# 17. autonomous completion: review re-runs reuse the worktree, close takes a team, prompts carry the review loop
+# 17. autonomous completion: review re-runs reuse the worktree, prompts carry the review loop
 reset; mkdir -p "$HOME/.herdr/worktrees/$S/T7-review"
 out=$(BRANCH_EXISTS=1 "$CREW" team review T7 "again" 2>&1)
 in_log "review reuse: checkout --detach of crew/T7-pair in the existing worktree" "checkout --detach crew/T7-pair"
 [[ $(cnt 'worktree add --detach') == 0 ]] && pass "review reuse: no new worktree add" || flunk "review reuse: added a worktree"
 rmdir "$HOME/.herdr/worktrees/$S/T7-review"
-reset
-out=$("$CREW" close T7 review 2>&1)
-in_log "close team: closes the T7 review tab" "tab close w1:t2"
-[[ $(cnt 'tab close w1:t1') == 0 ]] && pass "close team: leaves the T7 pair tab" || flunk "close team: closed the T7 pair tab"
 in_out "prompt: manager runs the review team" "herdr-crew team review T<n>" "$(cat "$(dirname "$CREW")/../agents/crew-manager/AGENTS.md")"
 in_out "prompt: manager marks done after approval" "mark T<n> done" "$(cat "$(dirname "$CREW")/../agents/crew-manager/AGENTS.md")"
 in_out "prompt: manager monitors through crew wait" 'herdr-crew wait <agent> --timeout 60' "$(cat "$(dirname "$CREW")/../agents/crew-manager/AGENTS.md")"
@@ -428,11 +424,28 @@ hc_log -e --arg terminal "$manager_term" --arg message "[from $S-t7-driver] $S-t
   && pass "handoff: sends manager notification through hc" || flunk "handoff: manager was not notified"
 reject "handoff: refuses with no body and no file" "no handoff at" "" handoff "x"
 
-# restart: /exit, wait for the shell, start again with a readable handoff path
+# restart: /exit, wait for the shell prompt, type the saved command into the same terminal, then the brief
 reset
-out=$("$CREW" restart "$S-t7-driver" 2>&1)
-in_log "restart: /exit the agent" "agent prompt $S-t7-driver /exit"
-in_log "restart: starts the agent again" "agent start $S-t7-driver --pane"
+restart_term=$(sed -n 's/^terminal=//p' "$HOME/.herdr/crew/$S/$S-t7-driver.meta")
+restart_cmd_file="$HOME/.herdr/crew/$S/$S-t7-driver.cmd"
+saved_cmd=$(cat "$restart_cmd_file" 2>/dev/null || true)
+[[ -n "$saved_cmd" ]] && pass "restart: saves the exact agent command" || flunk "restart: no saved command"
+in_out "restart: saved command keeps model bytes" "--model haiku" "$saved_cmd"
+in_out "restart: saved command keeps effort bytes" "--effort high" "$saved_cmd"
+printf 'fixture %% \n' >"$STATE/screen.$restart_term"
+printf 'working\nnull\nworking\nworking\nworking\n' >"$STATE/get-seq.$restart_term"
+rc=0; out=$("$CREW" restart "$S-t7-driver" 2>&1) || rc=$?
+(( rc == 0 )) && pass "restart: succeeds" || flunk "restart: rc=$rc ($out)"
+hc_log -e --arg t "$restart_term" --arg saved "$saved_cmd" '
+  [.[] | select(.[0:2] == ["hc","send"] and .[2] == $t) | .[3]] as $m
+  | ($m | length) == 3 and $m[0] == "/exit" and $m[1] == $saved' >/dev/null \
+  && pass "restart: /exit then the saved command in the same terminal" || flunk "restart: wrong terminal or command"
+hc_log -e --arg t "$restart_term" --arg handoff "Resume from your handoff: $HOME/.herdr/crew/$S/handoff-$S-t7-driver.md" '
+  [.[] | select(.[0:2] == ["hc","send"] and .[2] == $t) | .[3]][2] | contains($handoff)' >/dev/null \
+  && pass "restart: brief points at the handoff" || flunk "restart: brief has no handoff line"
+[[ $(cnt 'herdr-app') == 0 ]] && pass "restart: no tab or space call" || flunk "restart: used the app"
+[[ $(cnt 'agent start') == 0 && $(cnt 'agent prompt') == 0 ]] && pass "restart: no legacy agent call" || flunk "restart: used legacy agent commands"
+[[ "$(cat "$restart_cmd_file")" == "$saved_cmd" ]] && pass "restart: keeps the saved command bytes" || flunk "restart: rebuilt the command"
 in_out "restart: saved brief resumes from the handoff" "Resume from your handoff: $HOME/.herdr/crew/$S/handoff-$S-t7-driver.md" "$(cat "$HOME/.herdr/crew/$S/$S-t7-driver.brief")"
 [[ -f "$HOME/.herdr/crew/$S/handoff-$S-t7-driver.md" ]] && pass "restart: handoff remains readable" || flunk "restart: handoff missing"
 
@@ -452,12 +465,29 @@ in_out "prompt: lead has the Monitor tool" "Monitor" "$(cat "$(dirname "$CREW")/
 in_out "prompt: lead monitors with herdr-crew watch" "herdr-crew watch" "$(cat "$(dirname "$CREW")/../agents/crew-lead/AGENTS.md")"
 in_out "prompt: manager restarts a worker on handoff" "herdr-crew restart <agent>" "$(cat "$(dirname "$CREW")/../agents/crew-manager/AGENTS.md")"
 
-# 19. Restart survives an agent that already exited.
-reset; touch "$STATE/gone"
+# 19. Restart after a normal exit reuses the wrapper shell; a finished terminal fails before any app call.
+reset
+printf 'fixture %% \n' >"$STATE/screen.$restart_term"
+printf 'null\nworking\nworking\nworking\n' >"$STATE/get-seq.$restart_term"
 rc=0; out=$("$CREW" restart "$S-t7-driver" 2>&1) || rc=$?
-(( rc == 0 )) && pass "restart gone: succeeds" || flunk "restart gone: rc=$rc"
-in_log "restart gone: reaches start" "agent start $S-t7-driver"
-rm -f "$STATE/gone" "$STATE/shell"
+(( rc == 0 )) && pass "restart shell: succeeds without /exit" || flunk "restart shell: rc=$rc ($out)"
+hc_log -e --arg t "$restart_term" '
+  [.[] | select(.[0:2] == ["hc","send"] and .[2] == $t) | .[3]] as $m
+  | ($m | length) == 2 and ($m | index("/exit")) == null' >/dev/null \
+  && pass "restart shell: sends the command and brief only" || flunk "restart shell: sent /exit into the shell"
+[[ $(grep -c '^Resume from your handoff: ' "$HOME/.herdr/crew/$S/$S-t7-driver.brief") == 1 ]] \
+  && pass "restart shell: one resume line" || flunk "restart shell: resume line duplicated or missing"
+"$FAKE/hc" kill "$restart_term"
+reset
+rc=0; out=$("$CREW" restart "$S-t7-driver" 2>&1) || rc=$?
+if (( rc != 0 )) && [[ "$out" == *"the agent's pane is gone"* && "$out" == *"relaunch the team"* ]]; then
+  pass "restart finished: names the gone pane"
+else
+  flunk "restart finished: rc=$rc ($out)"
+fi
+[[ $(hc_log '[.[] | select(.[0:2] == ["hc","send"])] | length') == 0 && $(cnt 'herdr-app') == 0 ]] \
+  && pass "restart finished: no send and no app call" || flunk "restart finished: mutated before failing"
+rm -f "$STATE/shell"
 
 # 20. App terminals have no legacy name registry to clear.
 ! grep -qF 'clear_stale_name' "$ROOT/bin/crew" && pass "app terminals: no name registry cleanup" || flunk "app terminals: legacy name cleanup remains"
@@ -803,6 +833,44 @@ rc=0; out=$("$CREW" completion 2>&1) || rc=$?
   (( rc == 0 )) && pass "paste: swallowed Enter recovers first brief" || flunk "paste: launch rc=$rc ($out)"
   jq -s -e '[.[] | select(. == ["hc","keys","t1","enter"])] | length == 1' "$READY_LOG" >/dev/null \
     && pass "paste: retries Enter once after visible first line" || flunk "paste: Enter retry missing or duplicated"
+
+  # 30. close resolves app tabs by label prefix, closes by ID, and never matches another task.
+  CLOSE_FAKE="$TMP/close-fake"; CLOSE_STATE="$TMP/close-state"; CLOSE_HOME="$TMP/close-home"; CLOSE_LOG="$TMP/close-log"
+  close_fixture() {
+    rm -rf "$CLOSE_FAKE" "$CLOSE_STATE" "$CLOSE_HOME"
+    mkdir -p "$CLOSE_FAKE" "$CLOSE_STATE" "$CLOSE_HOME"; : >"$CLOSE_LOG"
+    install_fake_runtime "$CLOSE_FAKE" "$CLOSE_STATE"
+    cargv='["env","CREW_AGENT=close","claude"]'
+    close_space=$("$CLOSE_FAKE/herdr-app" do space.new --name crew-close --folder "$TMP" --tab "T7 pair" --argv "$cargv" | jq -r '.space')
+    pair_tab=$("$CLOSE_FAKE/herdr-app" ls | jq -r --arg s "$close_space" '.spaces[] | select(.id == $s) | .tabs[0].id')
+    "$CLOSE_FAKE/herdr-app" do tab.rename --id "$pair_tab" --name "T7 pair · close-fixture-t7-driver: tests pass" >/dev/null
+    renamed_tab=$("$CLOSE_FAKE/herdr-app" do tab.new --space "$close_space" --name "T7 pair · close-fixture-t7-navigator: nav ok" --folder "$TMP" --argv "$cargv" | jq -r '.tab')
+    t70_tab=$("$CLOSE_FAKE/herdr-app" do tab.new --space "$close_space" --name "T70 pair" --folder "$TMP" --argv "$cargv" | jq -r '.tab')
+    review_tab=$("$CLOSE_FAKE/herdr-app" do tab.new --space "$close_space" --name "T7 review" --folder "$TMP" --argv "$cargv" | jq -r '.tab')
+  }
+  close_fixture
+  mkdir -p "$CLOSE_HOME/.herdr/worktrees/close-fixture/T7-pair"
+  close_crew() { env PATH="$CLOSE_FAKE:$FAKE:$PATH" HOME="$CLOSE_HOME" STATE="$CLOSE_STATE" LOG="$CLOSE_LOG" CREW_WS="$close_space" CREW_SLUG=close-fixture CREW_REPO="$REPO" "$CREW" close "$@"; }
+  : >"$CLOSE_LOG"
+  rc=0; out=$(close_crew T7 pair 2>&1) || rc=$?
+  (( rc == 0 )) && pass "close team: succeeds" || flunk "close team: rc=$rc ($out)"
+  jq -s -e --arg a "$pair_tab" --arg b "$renamed_tab" --arg c "$review_tab" '
+    [.[] | select(.[0:3] == ["herdr-app","do","tab.close"]) | .[4]] | sort == ([$a,$b,$c] | sort)' "$CLOSE_LOG" >/dev/null \
+    && pass "close team: prefix closes pair, renamed pair and review by ID" || flunk "close team: wrong tabs ($(cat "$CLOSE_LOG"))"
+  in_out "close team: keeps the worktree output" "git -C $REPO worktree remove $CLOSE_HOME/.herdr/worktrees/close-fixture/T7-pair" "$out"
+  close_fixture
+  : >"$CLOSE_LOG"
+  rc=0; out=$(close_crew T7 2>&1) || rc=$?
+  (( rc == 0 )) && pass "close task: succeeds" || flunk "close task: rc=$rc ($out)"
+  jq -s -e --arg a "$pair_tab" --arg b "$renamed_tab" --arg c "$review_tab" --arg d "$t70_tab" '
+    ([.[] | select(.[0:3] == ["herdr-app","do","tab.close"]) | .[4]] | sort) == ([$a,$b,$c] | sort) and
+    ([.[] | select(.[0:3] == ["herdr-app","do","tab.close"]) | .[4]] | index($d)) == null' "$CLOSE_LOG" >/dev/null \
+    && pass "close task: prefix match leaves T70" || flunk "close task: closed the wrong tabs"
+  : >"$CLOSE_LOG"
+  rc=0; out=$(close_crew T9 2>&1) || rc=$?
+  (( rc != 0 )) && in_out "close missing: fails" "no tab labelled 'T9 ...'" "$out" || flunk "close missing: rc=$rc ($out)"
+  jq -s -e '[.[] | select(.[0:3] == ["herdr-app","do","tab.close"])] | length == 0' "$CLOSE_LOG" >/dev/null \
+    && pass "close missing: no close call" || flunk "close missing: closed something"
 
 echo
 if (( fails == 0 )); then echo "ALL PASS"; else echo "$fails FAILED"; exit 1; fi

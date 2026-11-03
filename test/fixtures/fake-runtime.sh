@@ -75,7 +75,12 @@ case "$command" in
     fi
     message=${1:-}
     printf '%s\n' "$message" >>"$STATE/sent.$terminal"
-    if [[ $(jq -r '.swallow // false' "$STATE/term.$terminal") == true ]]; then
+    if [[ "$message" == "/exit" ]]; then
+      # The app wrapper returns to a shell prompt when the agent exits normally.
+      jq '.status = null | .turn = ((.turn // 0) + 1)' "$STATE/term.$terminal" >"$STATE/term.$terminal.tmp"
+      mv "$STATE/term.$terminal.tmp" "$STATE/term.$terminal"
+      printf '%s\n' 'fixture shell %' >"$STATE/screen.$terminal"
+    elif [[ $(jq -r '.swallow // false' "$STATE/term.$terminal") == true ]]; then
       printf '%s\n' "$message" >"$STATE/screen.$terminal"
     elif [[ $(jq -r '.keepTurn // false' "$STATE/term.$terminal") == true ]]; then
       jq '.status = "working"' "$STATE/term.$terminal" >"$STATE/term.$terminal.tmp"
