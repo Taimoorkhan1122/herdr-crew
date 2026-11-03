@@ -524,12 +524,14 @@ cmd_team() {
   preflight_team "$team"
   members=$(conf "$team" members); wt=$(conf "$team" worktree)
   if [[ "$wt" == pair-branch ]]; then branch_exists "crew/$T-pair" || die "no branch crew/$T-pair: run 'team pair $T' first"; fi
-  local saved_meta saved_terminal saved_info saved_state
-  for saved_meta in "$SDIR"/*.meta; do
-    [[ -f "$saved_meta" ]] || continue
-    grep -qxF "task=$T" "$saved_meta" || continue
-    saved_terminal=$(sed -n 's/^terminal=//p' "$saved_meta" | head -1)
-    [[ -n "$saved_terminal" ]] || continue
+  for m in $members; do
+    rank=${m%%@*}; job=""
+    if [[ "$m" == *@* ]]; then job=${m#*@}; fi
+    ranks+=("$rank"); jobs+=("$job"); names+=("$(agent_name "$T" "${job:-$rank}")")
+  done
+  local saved_terminal saved_info saved_state
+  for n in "${names[@]}"; do
+    saved_terminal=$(terminal_of "$n") || continue
     if saved_info=$(hc get "$saved_terminal" --json 2>/dev/null); then
       saved_state=$(jq -r '.state // empty' <<<"$saved_info")
       [[ "$saved_state" == finished ]] || die "$T already running; use say or restart"
@@ -564,11 +566,6 @@ cmd_team() {
       cwd="$path" ;;
   esac
 
-  for m in $members; do
-    rank=${m%%@*}; job=""
-    if [[ "$m" == *@* ]]; then job=${m#*@}; fi
-    ranks+=("$rank"); jobs+=("$job"); names+=("$(agent_name "$T" "${job:-$rank}")")
-  done
   # Create worktree first. Then the first argv becomes the space's real initial tab if needed.
   label="$T $team"
   for ((i = 0; i < ${#names[@]}; i++)); do

@@ -9,6 +9,20 @@ reset_case() {
   export CREW_REPO="$REPO" CREW_SLUG="case-$1" CREW_WS=w1
   unset HERDR_WORKSPACE_ID HC_TERMINAL_ID
 }
+reset_case coexist
+export BRANCH_EXISTS=1
+"$CREW" team pair T7 first >/dev/null 2>&1; pair_rc=$?
+driver_meta="$HOME/.herdr/crew/$CREW_SLUG/$CREW_SLUG-t7-driver.meta"
+navigator_meta="$HOME/.herdr/crew/$CREW_SLUG/$CREW_SLUG-t7-navigator.meta"
+cp "$driver_meta" "$TMP/pair-driver.meta"; cp "$navigator_meta" "$TMP/pair-navigator.meta"
+: >"$LOG"
+out=$("$CREW" team review T7 review 2>&1); review_rc=$?
+review_meta="$HOME/.herdr/crew/$CREW_SLUG/$CREW_SLUG-t7-code-reviewer.meta"
+label='live pair and review coexist with only reviewer created'; check bash -c '[[ $1 == 0 && $2 == 0 && -s "$3" ]] && cmp -s "$4" "$5" && cmp -s "$6" "$7" && sed -n '\''/^\["herdr-app"/p'\'' "$8" | jq -se '\''([.[] | select(.[0:3] == ["herdr-app","do","tab.new"])] | length) == 1 and ([.[] | select(.[0:3] == ["herdr-app","do","pane.split"])] | length) == 0'\'' >/dev/null' _ "$pair_rc" "$review_rc" "$review_meta" "$driver_meta" "$TMP/pair-driver.meta" "$navigator_meta" "$TMP/pair-navigator.meta" "$LOG"
+: >"$LOG"
+out=$("$CREW" team pair T7 again 2>&1); rc=$?
+label='repeated pair refuses and preserves both bindings'; check bash -c '[[ $1 != 0 && "$2" == *"already running"* ]] && cmp -s "$3" "$4" && cmp -s "$5" "$6" && ! rg -q "(tab.new|space.new|pane.split|worktree add)" "$7"' _ "$rc" "$out" "$driver_meta" "$TMP/pair-driver.meta" "$navigator_meta" "$TMP/pair-navigator.meta" "$LOG"
+unset BRANCH_EXISTS
 reset_case duplicate
 "$CREW" team investigate T7 first >/dev/null 2>&1
 meta="$HOME/.herdr/crew/$CREW_SLUG/$CREW_SLUG-t7-investigator.meta"
