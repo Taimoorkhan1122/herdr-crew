@@ -2,6 +2,10 @@
 
 Newest entries first. Each entry gives the date and what changed.
 
+## 2026-11-03
+
+- Completed the `herdr-core` and `herdr-app` migration on `feat/herdr-core-app-runtime` at 5785de0. Tasks 1-6 cover the shared runtime fixture, app-owned topology with explicit `env` argv, readiness and trust handling, `hc`-backed messaging and status, same-terminal restart and tab close, fixture cutover and documentation. Codex reviewed the whole branch at eb18dd8 and found six runtime blockers, weakened coverage and stale docs; 41f4622 and 5785de0 fix them. The coordinator reran nine suites, all exit 0; `git diff --check` exited 0; no legacy `herdr` command call remains. No push, merge or live acceptance.
+
 ## 2026-11-02
 
 - Stopped migration execution at the user's request during Task 3. Implementation worktree `feat/herdr-core-app-runtime` is at 2cec0e1 with Task 3 changes uncommitted in `bin/crew`, `test/dry-run.sh`, `test/fixtures/fake-runtime.sh` and `test/project-launch.sh`. Task 1 fixture commit b684233 passed review. Task 2 topology commit 2cec0e1 passed with three findings ruled as later-task scope. A partial patch is saved in the ignored SDD workspace. No implementation push, merge or live launch. Resume from `docs/LEAD_STATE.md` and the SDD ledger.

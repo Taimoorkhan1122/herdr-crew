@@ -1,16 +1,18 @@
 # Lead state and session checkpoint
 
-## Active checkpoint: migration execution stopped in Task 3; partial work preserved
+## Active checkpoint: herdr-core and herdr-app migration implemented on a local branch
 
-Updated: 2026-11-02 17:54 PKT (Asia/Karachi). Implementation worktree `/Users/gok/.local/share/opencode/worktree/e95e5b/herdr-core-runtime`, branch `feat/herdr-core-app-runtime`, HEAD 2cec0e1. The research branch `docs/herdr-core-app-migration-research` is pushed at 42a8f5f and PR #7 is open at https://github.com/Taimoorkhan1122/herdr-crew/pull/7. The user approved ADR 0025 and the plan, approved the push, chose subagent-driven execution, and then asked to stop all work. No merge, implementation push, installation or live launch is authorized.
+Updated: 2026-11-03 20:15 PKT (Asia/Karachi). Implementation branch `feat/herdr-core-app-runtime` is at 5785de0 in a linked worktree; the tree is clean. The research branch `docs/herdr-core-app-migration-research` is pushed at 42a8f5f and PR #7 is open at https://github.com/Taimoorkhan1122/herdr-crew/pull/7. No implementation push, merge, installation or live launch is authorized.
 
-Completed: ADR 0025 and the six-task plan are pushed in PR #7. Task 1 added `test/fixtures/fake-runtime.sh` as commit b684233; its review was clean. Task 2 routed launch and team topology through `herdr-app` as commit 2cec0e1; its review found three items, ruled as later-task scope: the lead-rerun path reaches legacy `cmd_say` (Task 4), metadata is written before readiness (Task 3), and the worktree/agent-config fixtures lack `herdr-app` (Task 6). The full ledger is `.superpowers/sdd/2026-11-02-herdr-core-app-migration/progress.md`.
+Objective and scope: replace legacy `herdr` with `herdr-core` (`hc`) plus the required `herdr-app`. The user approved ADR 0025 and the six-task plan, approved the research push, chose subagent-driven execution, then directed the remaining work to the Codex pane. Full automated verification passed on the branch.
 
-Work in hand: Task 3 (readiness, trust dialog, first brief) was stopped before commit. Uncommitted changes remain in `bin/crew`, `test/dry-run.sh`, `test/fixtures/fake-runtime.sh` and `test/project-launch.sh` (about 199 insertions). The diff is saved at `.superpowers/sdd/2026-11-02-herdr-core-app-migration/task-3-partial.patch`. A stop request went to that subagent; no Task 3 commit exists. Preserve all four modified files and the patch. No final test result exists for this partial tree.
+Completed: ADR 0025 and the plan are in PR #7. Implementation commits b684233, 2cec0e1, ee80054, 85455cf, bb51894, 6310feb, eb18dd8, 41f4622 and 5785de0 cover the fixture, topology, readiness, messaging, restart and close, cutover, and review fixes. Codex reviewed the whole branch at eb18dd8 and found six runtime blockers, weakened coverage and stale docs. Commits 41f4622 and 5785de0 fix them: team-scoped close, blocked-never-Enter, dry-run restart, per-name duplicate guard, state writes after delivery, close space fallback, board environment, and the restored regressions.
 
-Limits: `test/worktrees.sh` and `test/agent-config.sh` fail until Task 6 installs the new runtime fixture. No live crew has run. No launcher behavior is verified live.
+Evidence: the coordinator ran `test/review-regressions.sh`, `test/dry-run.sh`, `test/project-launch.sh`, `test/worktrees.sh`, `test/agent-config.sh`, `test/partial-init.sh`, `test/test-hook-integration.sh`, `test/project-baseline.sh` and `test/hooks.sh`; every suite exited 0. `git diff --check` exited 0 and the legacy `herdr` command scan found no matches.
 
-Next: 1) Read the ledger and `task-3-partial.patch`, then inspect the four modified files. 2) Resume Task 3: implement `wait_ready`, `submit_term` and `register_agent`; move the meta write behind readiness; then run dry-run and project-launch RED/GREEN and commit. 3) Continue Tasks 4-6 and the final whole-branch review. 4) Push, merge or live launch only with explicit approval.
+Limits: all runtime checks use fakes plus real Git in disposable repositories. No live app or agent acceptance, installation, push or merge. Remaining live gaps: app restart with live terminals, pane title behavior, split ratio, headless use, and a real permission-blocked agent.
+
+Next: 1) Review the local branch and decide whether to push it. 2) Push only with explicit authorization. 3) Merge only with explicit approval. 4) Run a live acceptance crew only with separate authorization. The ledger is `.superpowers/sdd/2026-11-02-herdr-core-app-migration/progress.md`.
 
 ## Historical checkpoint: validation spikes passed; research updated, PR #7 open
 

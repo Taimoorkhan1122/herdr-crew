@@ -14,7 +14,7 @@ These files record how herdr-crew got built, why it is built the way it is, and 
 - `../reports/Herdr core and app migration.md`: migration research for `herdr-core` and `herdr-app`, with the Option A recommendation.
 - `../research_notes/Herdr core and app migration/validation-spikes-2026-11-02.md`: observed core and app behavior behind that report.
 - `superpowers/plans/2026-10-29-project-agent-baseline.md`: regression-first implementation plan and execution handoff; implementation and evaluations have not run.
-- `superpowers/plans/2026-11-02-herdr-core-app-migration.md`: regression-first plan for the runtime replacement; implementation has not started.
+- `superpowers/plans/2026-11-02-herdr-core-app-migration.md`: regression-first plan for the runtime replacement; implemented on branch `feat/herdr-core-app-runtime`, not merged.
 - `PROGRESS.md`: a dated log of each change session, newest first.
 - `maintainability-review-2026-10-14.md`: independent KISS review findings and proposed focused fixes; not implemented.
 - `adr/`: architecture decision records (ADRs). Each file records one decision, its context, and its consequences.
