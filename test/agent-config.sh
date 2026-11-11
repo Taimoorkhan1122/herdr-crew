@@ -15,6 +15,8 @@ git -C "$TEMP_ROOT/other" init -q
 export LOG="$TEMP_ROOT/runtime.log"
 source "$(cd "$(dirname "$0")/.." && pwd)/test/fixtures/fake-runtime.sh"
 install_fake_runtime "$TEMP_ROOT/fake" "$TEMP_ROOT/state"
+# Command Code stand-in: --version and --list-models only, never a session.
+install_fake_cmd "$TEMP_ROOT/fake" "$TEMP_ROOT/state"
 for tool in hc herdr-app tsk claude; do
   cat >"$TEMP_ROOT/fake/$tool" <<'SH'
 #!/usr/bin/env bash
@@ -185,6 +187,48 @@ run --show
 driver_row=$(printf '%s\n' "$out" | awk -F '\t' '$1 == "driver" {print $3, $4}')
 expect 'changing OpenCode model clears variants inherited from another model' '[[ $rc == 0 && "$driver_row" == "local/plain default" ]]'
 
+# Command Code configuration: the model list is the fake `cmd --list-models` table, and the
+# binary is metadata-only. A real cmd may exist on PATH, so the fake directory comes first.
+: >"$STATE/cmd.log"
+run driver command-code --model deepseek/deepseek-v4.1-flash --effort high
+expect 'configure accepts command-code and saves agent, model and effort' '[[ $rc == 0 ]] && jq -e '\''.roles.driver == {agent:"command-code",model:"deepseek/deepseek-v4.1-flash",effort:"high"}'\'' .herdr-crew.json >/dev/null'
+run --show
+cc_row=$(printf '%s\n' "$out" | awk -F '\t' '$1 == "driver" {print $2, $3, $4}')
+expect 'show reports the command-code row' '[[ $rc == 0 && "$cc_row" == "command-code deepseek/deepseek-v4.1-flash high" ]]'
+expect 'the Command Code model list is cached for offline validation' '[[ -f "$HOME/.herdr/crew/command-code-models" ]] && grep -qxF deepseek/deepseek-v4.1-flash "$HOME/.herdr/crew/command-code-models" && grep -qxF claude-sonnet-5-5 "$HOME/.herdr/crew/command-code-models" && ! grep -qxF Recommended "$HOME/.herdr/crew/command-code-models"'
+expect 'configure read the model list and never started a Command Code session' '[[ -s "$STATE/cmd.log" ]] && ! grep -q unsupported "$STATE/cmd.log"'
+cp .herdr-crew.json "$TEMP_ROOT/before-cc"
+run driver command-code --model not/a-listed-model
+expect 'Command Code rejects a model that is not in --list-models' '[[ $rc != 0 && "$out" == *"list-models"* ]] && cmp -s .herdr-crew.json "$TEMP_ROOT/before-cc"'
+run driver command-code --model 'space model'
+expect 'Command Code rejects a model containing a space' '[[ $rc != 0 ]] && cmp -s .herdr-crew.json "$TEMP_ROOT/before-cc"'
+run driver command-code --model 'bad#model'
+expect 'Command Code rejects a model containing #' '[[ $rc != 0 ]] && cmp -s .herdr-crew.json "$TEMP_ROOT/before-cc"'
+run driver command-code --effort high
+expect 'Command Code effort without a model is rejected' '[[ $rc != 0 && "$out" == *"explicit --model"* ]] && cmp -s .herdr-crew.json "$TEMP_ROOT/before-cc"'
+run driver commandcode --model deepseek/deepseek-v4.1-flash
+expect 'the runtime alias commandcode is rejected as an agent' '[[ $rc != 0 && "$out" == *"invalid agent configuration"* ]] && cmp -s .herdr-crew.json "$TEMP_ROOT/before-cc"'
+run driver command_code
+expect 'the runtime alias command_code is rejected as an agent' '[[ $rc != 0 && "$out" == *"invalid agent configuration"* ]] && cmp -s .herdr-crew.json "$TEMP_ROOT/before-cc"'
+run driver bogus
+expect 'an unknown agent is still rejected next to command-code' '[[ $rc != 0 ]] && cmp -s .herdr-crew.json "$TEMP_ROOT/before-cc"'
+# Wizard: role, the exact token, a search term, a choice number, an effort, then stop.
+run --interactive <<'INPUT'
+driver
+command-code
+sonnet
+1
+low
+n
+INPUT
+expect 'wizard configures command-code from the catalog by search and number' '[[ $rc == 0 ]] && jq -e '\''.roles.driver == {agent:"command-code",model:"claude-sonnet-5-5",effort:"low"}'\'' .herdr-crew.json >/dev/null'
+cp .herdr-crew.json "$TEMP_ROOT/before-cc-wizard"
+run --interactive <<'INPUT'
+driver
+command-code
+INPUT
+expect 'wizard EOF cancels without a Command Code write' '[[ $rc != 0 && "$out" == *"cancelled"* ]] && cmp -s .herdr-crew.json "$TEMP_ROOT/before-cc-wizard"'
+
 # Runtime adapter tests: capture each argument exactly, not shell-flattened text.
 rm .herdr-crew.json
 printf '%s\n' '{"version":1,"roles":{}}' >.herdr-crew.json
@@ -297,5 +341,101 @@ rc=0
 out=$("$CREW" configure --show 2>&1) || rc=$?
 expect 'OpenCode effort with explicit model validates' '[[ $rc == 0 ]]'
 rm .herdr-crew.json
+
+# Command Code launches: version gate, missing binary, built argv, native mod, permission
+# modes and the pinned restart. argv_program/argv_value read the app --argv JSON exactly.
+argv_program() { jq -r '[.[] | select(test("^[A-Za-z_][A-Za-z0-9_]*=") | not)][1] // ""' <<<"$1"; }
+argv_value() { jq -r --arg flag "$2" '. as $a | ($a | index($flag)) as $i | if $i == null then "" else $a[$i + 1] end' <<<"$1"; }
+# command_flag_value COMMAND FLAG: the value that follows FLAG in a saved command line.
+command_flag_value() {
+  /bin/bash -c 'flag=$2; eval "set -- $1"; while (( $# )); do if [[ "$1" == "$flag" ]]; then shift; printf "%s\n" "$1"; exit 0; fi; shift; done; exit 1' _ "$1" "$2"
+}
+cc_argv_of() { jq -c --arg agent "CREW_AGENT=$1" '[.[] | select(any(.[]; . == $agent))][0] // []' <<<"$2"; }
+
+# The launch section initializes the project baseline, so the live config moves to
+# .herdr-crew/config.json. Start Command Code coverage from an empty assignment set.
+mkdir -p .herdr-crew
+printf '%s\n' '{"version":1,"roles":{}}' >.herdr-crew/config.json
+
+# The version gate runs in preflight, before a task, tab or worktree exists.
+printf '1.80.0\n' >"$STATE/cmd-version"
+run member command-code --model claude-sonnet-5-5
+: >"$LOG"
+launch team pair T20 'old command code'
+expect 'Command Code older than 1.88.5 fails before task, tab or worktree creation' '[[ $rc != 0 && "$out" == *"1.88.5"* ]] && ! jq -se '\''any(.[]; .[0:3] == ["herdr-app","do","tab.new"] or .[0:3] == ["herdr-app","do","space.new"])'\'' "$LOG" >/dev/null && ! jq -se '\''any(.[]; .[0] == "tsk")'\'' "$LOG" >/dev/null && [[ ! -e "$HOME/.herdr/worktrees/config-fixture/T20-pair" ]]'
+printf '1.88.5\n' >"$STATE/cmd-version"
+
+# A PATH with the other runtimes but no cmd, command-code or commandcode.
+mkdir -p "$TEMP_ROOT/no-command-code"
+for tool in hc herdr-app tsk claude opencode; do ln -sf "$TEMP_ROOT/fake/$tool" "$TEMP_ROOT/no-command-code/$tool"; done
+ln -sf "$(command -v jq)" "$TEMP_ROOT/no-command-code/jq"
+: >"$LOG"
+rc=0
+out=$(PATH="$TEMP_ROOT/no-command-code:/usr/bin:/bin" "$CREW" team pair T21 'missing command code binary' 2>&1) || rc=$?
+expect 'a PATH without cmd fails with a message naming command-code' '[[ $rc != 0 && "$out" == *"command-code not found"* && ! -s "$LOG" && ! -e "$HOME/.herdr/worktrees/config-fixture/T21-pair" ]]'
+
+# Member and inspector configured as Command Code: one tab, plan for the inspector.
+run driver command-code --model deepseek/deepseek-v4.1-flash --effort high
+run inspector command-code --model claude-sonnet-5-5
+: >"$LOG"
+launch team pair T22 'command code pair'
+argvs=$(app_argvs)
+cc_driver_argv=$(cc_argv_of config-fixture-t22-driver "$argvs")
+cc_nav_argv=$(cc_argv_of config-fixture-t22-navigator "$argvs")
+cc_driver_program=$(argv_program "$cc_driver_argv")
+cc_driver_mode=$(argv_value "$cc_driver_argv" --permission-mode)
+cc_nav_mode=$(argv_value "$cc_nav_argv" --permission-mode)
+cc_driver_mod=$(argv_value "$cc_driver_argv" --mod)
+cc_nav_mod=$(argv_value "$cc_nav_argv" --mod)
+expect 'Command Code member program is cmd by basename, not an absolute path' '[[ $rc == 0 && "$cc_driver_program" == cmd ]]'
+expect 'Command Code member argv carries -n NAME, the crew flags, --mod, --model and --effort' 'jq -e '\''(. as $a | ($a | index("-n")) as $n | $a[$n + 1] == "config-fixture-t22-driver") and index("-t") != null and index("--skip-onboarding") != null and index("--no-auto-update") != null and index("--mod") != null and index("--model") != null and index("--effort") != null'\'' <<<"$cc_driver_argv" >/dev/null'
+expect 'Command Code member argv carries the configured model and effort' 'jq -e '\''(. as $a | ($a | index("--model")) as $m | ($a | index("--effort")) as $e | $a[$m + 1] == "deepseek/deepseek-v4.1-flash" and $a[$e + 1] == "high")'\'' <<<"$cc_driver_argv" >/dev/null'
+expect 'Command Code argv has no --agent, --agents, --settings or --standalone' 'jq -e '\''index("--agent") == null and index("--agents") == null and index("--settings") == null and index("--standalone") == null'\'' <<<"$cc_driver_argv" >/dev/null'
+expect 'Command Code argv names neither claude nor opencode' 'jq -e '\''any(.[]; . == "claude" or . == "opencode") | not'\'' <<<"$cc_driver_argv" >/dev/null && jq -e '\''any(.[]; . == "claude" or . == "opencode") | not'\'' <<<"$cc_nav_argv" >/dev/null'
+expect 'Command Code member runs in yolo, the inspector in plan' '[[ "$cc_driver_mode" == yolo && "$cc_nav_mode" == plan ]]'
+expect 'the member --mod path is the generated mod and it exists' '[[ -n "$cc_driver_mod" && "$cc_driver_mod" == "$HOME/.herdr/crew/config-fixture/config-fixture-t22-driver.mod.ts" && -f "$cc_driver_mod" ]]'
+expect 'the inspector --mod path is its own generated mod' '[[ -n "$cc_nav_mod" && "$cc_nav_mod" == "$HOME/.herdr/crew/config-fixture/config-fixture-t22-navigator.mod.ts" && -f "$cc_nav_mod" ]]'
+
+# Native-deny regression: the generated mod text wires the hooks and carries the member
+# block reason. The suite does not execute the mod; a live headless run is recorded in STATE.
+cc_driver_reasons=$(sed -n 's/^ *return "\(Crew policy:.*\)";$/\1/p' "$cc_driver_mod" 2>/dev/null || true)
+expect 'the member mod wires beforeToolCall and onPermissionRequest' 'grep -qF beforeToolCall "$cc_driver_mod" && grep -qF onPermissionRequest "$cc_driver_mod"'
+expect 'the mod reads the native toolName field and the input command' 'grep -qF toolName "$cc_driver_mod" && grep -qF "value.command" "$cc_driver_mod"'
+expect 'the member mod names git, push, merge and gh pr merge' 'grep -qF git "$cc_driver_mod" && grep -qF push "$cc_driver_mod" && grep -qF merge "$cc_driver_mod" && grep -qF "gh pr merge" "$cc_driver_mod"'
+expect 'the member mod states the git push, git merge and gh pr merge block reason' '[[ "$cc_driver_reasons" == *"a member never runs git push, git merge or gh pr merge"* ]]'
+expect 'the member mod removes the subagent tools at session start' 'grep -qF onSessionStart "$cc_driver_mod" && grep -qF agent_output "$cc_driver_mod"'
+expect 'the member mod injects the rank/job instructions and runtime guidance' 'grep -qF "Implementation job. Work only in your working dir" "$cc_driver_mod" && grep -qF "Command Code runtime" "$cc_driver_mod"'
+expect 'the inspector mod states the no-write block reason' '[[ $(sed -n '\''s/^ *return "\(Crew policy:.*\)";$/\1/p'\'' "$cc_nav_mod") == *"never edits files"* ]]'
+
+# Lead and manager as Command Code: the lead runs in yolo and the manager mod blocks writes.
+run lead command-code --model claude-sonnet-5-5
+run manager command-code --model claude-sonnet-5-5
+: >"$LOG"
+rc=0; out=$(printf 'command code lead\n' | "$CREW" launch lead - 2>&1) || rc=$?
+argvs=$(app_argvs)
+cc_lead_argv=$(cc_argv_of config-fixture-lead "$argvs")
+cc_manager_argv=$(cc_argv_of config-fixture-manager "$argvs")
+cc_lead_mode=$(argv_value "$cc_lead_argv" --permission-mode)
+cc_manager_mod=$(argv_value "$cc_manager_argv" --mod)
+cc_manager_reason=$(sed -n 's/^ *return "\(Crew policy:.*\)";$/\1/p' "$cc_manager_mod" 2>/dev/null || true)
+expect 'Command Code lead runs in yolo' '[[ $rc == 0 && "$cc_lead_mode" == yolo && "$(argv_program "$cc_lead_argv")" == cmd ]]'
+expect 'the manager mod states the no-write block reason' '[[ -f "$cc_manager_mod" && "$cc_manager_reason" == *"never edits files"* ]]'
+
+# Restart reuses the saved command bytes (mod included) and the Command Code brief.
+: >"$LOG"
+cc_term=$(sed -n 's/^terminal=//p' "$HOME/.herdr/crew/config-fixture/config-fixture-t22-driver.meta")
+cc_saved=$(cat "$HOME/.herdr/crew/config-fixture/config-fixture-t22-driver.cmd")
+printf 'working\nnull\nworking\nworking\nworking\n' >"$STATE/get-seq.$cc_term"
+launch restart config-fixture-t22-driver
+expect 'restart types the saved Command Code command bytes including --mod' '[[ $rc == 0 ]] && jq -se --arg term "$cc_term" --arg command "$cc_saved" '\''any(.[]; . == ["hc","send",$term,$command])'\'' "$LOG" >/dev/null && [[ "$cc_saved" == *--mod* ]]'
+expect 'the pinned command keeps the model and effort bytes' '[[ "$cc_saved" == *"--model deepseek/deepseek-v4.1-flash"* && "$cc_saved" == *"--effort high"* ]]'
+cc_saved_mod=$(command_flag_value "$cc_saved" --mod 2>/dev/null || true)
+expect 'the mod named by the saved command still exists after restart' '[[ -n "$cc_saved_mod" && -f "$cc_saved_mod" && "$cc_saved_mod" == "$cc_driver_mod" ]]'
+cc_brief=$(cat "$HOME/.herdr/crew/config-fixture/config-fixture-t22-driver.brief" 2>/dev/null || true)
+expect 'the Command Code brief carries its guidance and not the Claude hook sentence' '[[ "$cc_brief" == *"Command Code runtime"* && "$cc_brief" == *"per-session native mod"* && "$cc_brief" != *"A hook warns you"* ]]'
+cc_restart_command=$(jq -sr --arg term "$cc_term" '[.[] | select(.[0:3] == ["hc","send",$term] and .[3] != "/exit") | .[3]][0]' "$LOG")
+expect 'Command Code carries no inline policy: the mod is the policy carrier' '! policy_from_command "$cc_restart_command" >/dev/null 2>&1'
+expect 'no launch started a Command Code session' '! grep -q unsupported "$STATE/cmd.log"'
+
 (( fails == 0 )) || { echo "$fails checks failed"; exit 1; }
 echo 'ALL PASS'

@@ -1,6 +1,22 @@
 # Lead state and session checkpoint
 
-## Active checkpoint: herdr-core and herdr-app migration implemented on a local branch
+## Active checkpoint: Command Code runtime adapter implemented and verified on branch `feat/command-code-adapter`
+
+Updated: 2026-11-11 (Asia/Karachi). Branch `feat/command-code-adapter`, based on `main` at 3a70672 (`feat: migrate runtime to herdr-core and herdr-app (#8)`). Implementation, tests and documentation are unstaged. The user authorized commit, push and PR; no merge is authorized. Untracked `.commandcode/` is preserved and excluded.
+
+Objective and authorized scope: first-class `command-code` runtime adapter for Command Code (`cmd`, 1.88.5 or later). Config token is exactly `command-code`; binary lookup prefers `cmd` with `command-code`/`commandcode` fallbacks; preflight requires 1.88.5. Claude and OpenCode paths must stay unchanged. Files: `bin/crew`, `lib/agent-config.sh`, `lib/agent-definitions.sh`, `lib/ux.sh`, tests, README, SKILL, features, ADR 0026, STATE, PROGRESS, this checkpoint. The downstream project and installed copies are out of scope.
+
+Completed: config validation and per-runtime selection traits; catalog-backed model validation with a one-day cache and syntax-only offline fallback; version and binary preflight; exact `cmd` argv (`-n`, `--model`, `--effort`, `--permission-mode`, `-t`, `--skip-onboarding`, `--no-auto-update`, `--mod`); a generated per-session mod that injects the saved rank/job instructions plus runtime guidance, blocks manager/inspector native writes and member `git push`/`git merge`/`gh pr merge`, attempts a context warning, and removes `agent`/`agent_output`; restart pinning. Tests extended in agent-config, dry-run, project-launch and hook-integration.
+
+Verification: the AGENTS.md shell-syntax block and the full `test/*.sh` suite pass. Counts: agent-config 108/0, dry-run 348/0, project-launch 21/0, hook-integration 19/0, plus definitions, worktrees, hooks, baseline, partial-init, review-regressions, completion-hook and installer. `git diff --check` is clean. The stale `test/fixtures/agent-definitions.sha256` entries for `agents/crew-manager` were refreshed to the committed bytes, removing a failure that also occurred at `main`. Live headless `cmd` 1.88.5 with a generated member mod: `beforeToolCall` emitted `tool_hook_blocked` for `git push` and the command did not run; `git status`/`cat` ran; `onSessionStart` removed `agent`/`agent_output` (30 → 28); `getContextUsage()` returned `tokens: null`, so the warning did not fire.
+
+Work in hand: commit the scoped files, push `feat/command-code-adapter`, and open a PR. No delegated task or test process remains. Do not touch `~/.local/bin/herdr-crew`, `~/.agents/skills/herdr-crew`, `.commandcode/`, or the downstream project.
+
+Limits: no interactive crew or Herdr pane launch on Command Code, so readiness, brief delivery, tab lifecycle and restart in a real pane remain live gaps. Manager/inspector no-write covers native file tools, not shell redirection; member Git denial is command-pattern based; the context warning can be unavailable; completion stays explicit through `mark`/`handoff`; there is no Monitor tool.
+
+Next: 1) `git status --short --branch` and inspect the scoped diff. 2) Commit (co-author trailer), push the branch, open the PR. 3) Do not merge. A live interactive acceptance run needs separate authorization.
+
+## Historical checkpoint: herdr-core and herdr-app migration implemented on a local branch
 
 Updated: 2026-11-03 20:25 PKT (Asia/Karachi). Implementation branch `feat/herdr-core-app-runtime` is pushed at e9ad478. PR #8 is open at https://github.com/Taimoorkhan1122/herdr-crew/pull/8 and is stacked on the research branch. The research branch `docs/herdr-core-app-migration-research` is pushed at 42a8f5f and PR #7 is open at https://github.com/Taimoorkhan1122/herdr-crew/pull/7. No merge, installation or live launch is authorized.
 

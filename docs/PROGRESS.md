@@ -2,6 +2,14 @@
 
 Newest entries first. Each entry gives the date and what changed.
 
+## 2026-11-11
+
+- First-class Command Code adapter on branch `feat/command-code-adapter`, above `main` at 3a70672. Config token is exactly `command-code`; the executable is `cmd` with `command-code`/`commandcode` fallbacks; preflight requires 1.88.5. Source: `lib/agent-config.sh` (validation, per-runtime traits, catalog cache, version gate, guidance), `lib/agent-definitions.sh` (`kind` enum), `lib/ux.sh` (help), and `bin/crew` (argv, per-session mod, brief). The mod uses `cmd.hooks` to inject rank/job instructions plus runtime guidance, block manager/inspector native writes and member `git push`/`git merge`/`gh pr merge`, attempt a context warning, and remove `agent`/`agent_output`. Claude and OpenCode paths are unchanged.
+- Why: a role in `.herdr-crew/config.json` can now run on Command Code. Command Code has no selectable primary agent (`--agent`/`--agents`/`--settings`) and its `.commandcode/agents/*.md` files are subagents, so the policy travels in a per-session `--mod` file instead of a renamed token or a shared settings file.
+- Checks: shell syntax passed for the launcher, libraries and every test. The full `test/*.sh` suite passes: agent-config 108 checks, dry-run 348, project-launch 21, hook-integration 19, plus definitions, worktrees, hooks, baseline, partial-init, review-regressions, completion-hook and installer suites. `git diff --check` and documentation link checks passed. One pre-existing `test/fixtures/agent-definitions.sha256` mismatch for `agents/crew-manager` was refreshed to the committed bytes; that suite previously failed at unmodified `main`.
+- Live evidence (headless `cmd` 1.88.5 with a generated member mod, free model): the mod loaded and appended its system prompt; `beforeToolCall` emitted `tool_hook_blocked` for `git push origin main` and the command did not run, while `git status` and `cat` ran; `onSessionStart` reduced tools 30 → 28 by removing `agent`/`agent_output`. `getContextUsage()` returned `{tokens:null, contextWindow:256000, percent:null}` after turns, so the warning is best-effort and did not fire. No interactive crew launch ran.
+- Limits: no interactive crew or Herdr pane launch on Command Code, so readiness, brief delivery, tab lifecycle and restart remain live gaps. Manager/inspector no-write covers native file tools, not shell redirection; member Git denial is command-pattern based and aliases/wrappers can evade it; the context warning can be unavailable; completion stays explicit through `mark`/`handoff`. No push or merge.
+
 ## 2026-11-03
 
 - Pushed `feat/herdr-core-app-runtime` at e9ad478 and opened PR #8, stacked on the research branch. No merge, installation or live acceptance.

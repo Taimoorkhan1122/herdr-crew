@@ -66,5 +66,11 @@ jq ' .status = "idle" ' "$STATE/term.$manager_term" >"$STATE/manager.tmp"; mv "$
 /bin/bash "$CREW" mark T7 blocked 'waiting for evidence' >"$TMP/mark-retry.out" 2>"$TMP/mark-retry.err" || true
 label='blocked result retries notification'; check bash -c '[[ $(rg -c "waiting for evidence" "$1") == 1 ]]' _ "$STATE/sent.$manager_term"
 label='blocked result does not mark task done'; check bash -c '! rg -q "tsk status T7 done" "$1"' _ "$LOG"
+# Command Code has no transcript hook: the mod carries the context warning, so the agent
+# keeps an empty context_hook and only the explicit completion hook.
+printf '%s\n' '{"version":1,"roles":{"investigator":{"agent":"command-code","model":"claude-sonnet-5-5"}}}' >"$REPO/.herdr-crew/config.json"
+if ! /bin/bash "$CREW" team investigate T8 'command code inspector' >"$TMP/cc.out" 2>"$TMP/cc.err"; then cat "$TMP/cc.err" >&2; exit 1; fi
+label='Command Code agent stores no context hook and an explicit completion hook'
+check bash -c '[[ -f "$1" ]] && [[ -z $(sed -n "s/^context_hook=//p" "$1") ]] && [[ -f $(sed -n "s/^completion_hook=//p" "$1") ]]' _ "$HOME/.herdr/crew/$S/$S-t8-investigator.meta"
 printf '%s failure(s)\n' "$fail"
 (( fail == 0 ))
