@@ -5,7 +5,6 @@ COMMAND_CODE_CATALOG=""
 # Runtime traits. A runtime that ignores the Claude aliases of a rank profile has no
 # usable model there; a variant-effort runtime carries the effort inside the model.
 runtime_ignores_profile_model() { [[ "$1" == opencode || "$1" == command-code ]]; }
-runtime_effort_is_model_variant() { [[ "$1" == opencode ]]; }
 
 # agent_bin KIND: the installed binary of a runtime. Command Code documents `cmd`;
 # `command-code` and `commandcode` are accepted aliases.
@@ -92,7 +91,7 @@ config_validate() {
 # agent_selection RANK JOB: sets AGENT_KIND/MODEL/EFFORT and a JSON snapshot.
 agent_selection() {
   local rank=$1 job=${2:-} kind model effort
-  # Mirrors runtime_effort_is_model_variant: only OpenCode carries the effort in the model.
+  # Only OpenCode carries the effort in the model variant.
   local variant_efforts='["opencode"]'
   local def
   def=$(agent_definition "${job:-crew-$rank}") || die "unknown agent '${job:-crew-$rank}'"

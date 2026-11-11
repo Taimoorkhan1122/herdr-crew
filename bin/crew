@@ -411,7 +411,9 @@ function forbidden(text) {
       previous = segment;
       segment = segment.replace(/^(?:env|command|exec|timeout|nohup|nice|sudo|xargs)\s+/, "");
     }
-    const gitOpts = String.raw`(?:(?:-C|-c|--git-dir|--work-tree)(?:\s+|=)(?:"[^"]*"|'[^']*'|\S+)\s+)*`;
+    const gitValueOpt = String.raw`(?:-C|-c|--git-dir|--work-tree|--namespace|--config-env|--exec-path|--super-prefix|--attr-source)`;
+    const gitOpt = String.raw`(?:${gitValueOpt}(?:\s+|=)(?:"[^"]*"|'[^']*'|\S+)|--[A-Za-z0-9-]+(?:=(?:"[^"]*"|'[^']*'|\S+))?|-[A-Za-z](?:"[^"]*"|'[^']*'|\S*)|--)\s+`;
+    const gitOpts = String.raw`(?:${gitOpt})*`;
     if (new RegExp(String.raw`(?:^|\s)git\s+${gitOpts}push(?:\s|$)`).test(segment)) return true;
     if (new RegExp(String.raw`(?:^|\s)git\s+${gitOpts}merge(?:\s|$)`).test(segment)) return true;
     if (/(?:^|\s)gh\s+pr\s+merge(?:\s|$)/.test(segment)) return true;
@@ -485,17 +487,46 @@ export default function (cmd) {
       };
     },
     onSessionStart: function () {
-      try {
-        const tools = (cmd.getAllTools && cmd.getAllTools()) || [];
-        const keep = [];
-        for (let i = 0; i < tools.length; i += 1) {
-          const tool = tools[i];
-          const label = typeof tool === "string" ? tool : (tool && (tool.name || tool.id)) || "";
-          if (label && label !== "agent" && label !== "agent_output") keep.push(label);
+      let tools = typeof cmd.getActiveTools === "function" ? cmd.getActiveTools() : [];
+      if (!tools || !tools.length) {
+        tools = typeof cmd.getAllTools === "function" ? cmd.getAllTools() : [];
+      }
+      tools = Array.isArray(tools) ? tools : [];
+      if (!tools.length) {
+        if (cmd.ui && cmd.ui.notify) {
+          cmd.ui.notify("herdr-crew: cannot read the tool list, so the subagent tools may stay active.", "error");
         }
-        if (keep.length && cmd.setActiveTools) cmd.setActiveTools(keep);
+        return;
+      }
+      const keep = [];
+      let removed = 0;
+      for (let i = 0; i < tools.length; i += 1) {
+        const tool = tools[i];
+        const label = typeof tool === "string" ? tool : (tool && (tool.name || tool.id)) || "";
+        if (!label) continue;
+        if (label === "agent" || label === "agent_output") removed += 1;
+        else keep.push(label);
+      }
+      if (!removed) return;
+      if (typeof cmd.setActiveTools !== "function") {
+        if (cmd.ui && cmd.ui.notify) {
+          cmd.ui.notify("herdr-crew: setActiveTools is unavailable, so the subagent tools stay active.", "error");
+        }
+        return;
+      }
+      try {
+        cmd.setActiveTools(keep);
       } catch (error) {
-        // Removing the subagent tools is best effort; POLICY still forbids delegating.
+        if (cmd.ui && cmd.ui.notify) {
+          cmd.ui.notify("herdr-crew: cannot remove the subagent tools: " + (error && error.message ? error.message : error), "error");
+        }
+        return;
+      }
+      const after = typeof cmd.getActiveTools === "function" ? cmd.getActiveTools() : [];
+      if (Array.isArray(after) && (after.indexOf("agent") !== -1 || after.indexOf("agent_output") !== -1)) {
+        if (cmd.ui && cmd.ui.notify) {
+          cmd.ui.notify("herdr-crew: the subagent tools are still active after the session-start filter.", "error");
+        }
       }
     }
   });

@@ -407,6 +407,78 @@ expect 'the member mod removes the subagent tools at session start' 'grep -qF on
 expect 'the member mod injects the rank/job instructions and runtime guidance' 'grep -qF "Implementation job. Work only in your working dir" "$cc_driver_mod" && grep -qF "Command Code runtime" "$cc_driver_mod"'
 expect 'the inspector mod states the no-write block reason' '[[ $(sed -n '\''s/^ *return "\(Crew policy:.*\)";$/\1/p'\'' "$cc_nav_mod") == *"never edits files"* ]]'
 
+# Execute the generated mod: static greps cannot show that global git options are consumed
+# or that the subagent filter reads the active tool list. Node is optional.
+if command -v node >/dev/null 2>&1; then
+  cp "$cc_driver_mod" "$TEMP_ROOT/cc-mod.mjs"
+  rc=0
+  out=$(node --input-type=module - "$TEMP_ROOT/cc-mod.mjs" <<'JS' 2>&1
+import { pathToFileURL } from "node:url";
+
+const mod = await import(pathToFileURL(process.argv[2]).href);
+const notices = [];
+const active = [];
+let hooks = {};
+const cmd = {
+  hooks(h) { hooks = h; return { dispose() {} }; },
+  getContextUsage() { return { tokens: null }; },
+  getActiveTools() { return ["read_file", "shell_command", "agent", "agent_output"]; },
+  setActiveTools(names) { active.length = 0; active.push(...names); },
+  ui: { notify(message, level) { notices.push({ message, level }); } },
+};
+await mod.default(cmd);
+const blocked = (command) =>
+  !!(hooks.beforeToolCall({ toolName: "shell_command", input: { command } }, {}) || {}).block;
+const cases = [
+  ["git --no-pager push origin main", true],
+  ["git -P merge topic", true],
+  ["git --bare push", true],
+  ["git --git-dir=.git push", true],
+  ["git --work-tree=.. merge topic", true],
+  ["git -C repo push", true],
+  ["git -c core.pager=cat push", true],
+  ["git -Crepo push", true],
+  ["gh pr merge 12", true],
+  ["git status", false],
+  ["git -C repo status", false],
+  ["git log --grep push", false],
+  ["git commit -m merge", false],
+  ["echo push", false],
+];
+let fails = 0;
+for (const [command, want] of cases) {
+  if (blocked(command) !== want) {
+    fails += 1;
+    console.log("FAIL matcher: " + command);
+  }
+}
+hooks.onSessionStart({ source: "startup" });
+if (active.join(",") !== "read_file,shell_command") {
+  fails += 1;
+  console.log("FAIL onSessionStart keep list: " + active.join(","));
+}
+
+let reported = false;
+let hooks2 = {};
+const cmd2 = {
+  hooks(h) { hooks2 = h; return { dispose() {} }; },
+  getActiveTools() { return []; },
+  ui: { notify() { reported = true; } },
+};
+await mod.default(cmd2);
+hooks2.onSessionStart({ source: "startup" });
+if (!reported) {
+  fails += 1;
+  console.log("FAIL onSessionStart did not report an unreadable tool list");
+}
+process.exit(fails ? 1 : 0);
+JS
+  ) || rc=$?
+  expect 'the generated member mod consumes global git options and filters tools via getActiveTools' '[[ $rc == 0 ]]'
+else
+  echo 'SKIP: node not found; the generated member mod was not executed'
+fi
+
 # Lead and manager as Command Code: the lead runs in yolo and the manager mod blocks writes.
 run lead command-code --model claude-sonnet-5-5
 run manager command-code --model claude-sonnet-5-5
