@@ -52,4 +52,5 @@ export PATH="$FAKE:$PATH" HOME="$TMP/home" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 CRE
 unset CREW_SLUG CREW_REPO CREW_AGENT CREW_TASK CREW_MANAGER CREW_DRY_RUN BRANCH_EXISTS
 source "$ROOT/test/fixtures/fake-runtime.sh"
 install_fake_runtime "$FAKE" "$STATE"
+install_fake_cmd "$FAKE" "$STATE"
 touch "$STATE/auto-ready"

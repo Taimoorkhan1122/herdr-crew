@@ -817,5 +817,26 @@ rc=0; out=$("$CREW" completion 2>&1) || rc=$?
   jq -s -e '[.[] | select(.[0:3] == ["herdr-app","do","tab.close"])] | length == 0' "$CLOSE_LOG" >/dev/null \
     && pass "close missing: no close call" || flunk "close missing: closed something"
 
+# 31. Command Code dry run: the planned app argv is cmd with its generated mod, in yolo,
+# and carries no Claude or OpenCode flags. Dry run prints the app call with its JSON argv;
+# it never prints a "+ env ..." line, because the agent program runs inside the app terminal.
+reset
+rc=0; out=$("$CREW" configure driver command-code --model claude-sonnet-5-5 --effort high 2>&1) || rc=$?
+(( rc == 0 )) && pass "dry-run command code: driver configured from the fake catalog" || flunk "dry-run command code: configure rc=$rc ($out)"
+reset
+rc=0; out=$(echo "dry command code" | CREW_DRY_RUN=1 "$CREW" launch driver - 2>&1) || rc=$?
+cc_planned=$(printf '%s\n' "$out" | sed -n 's/.*--argv \(\["env".*\)$/\1/p' | head -1)
+cc_program=$(jq -r '[.[] | select(test("^[A-Za-z_][A-Za-z0-9_]*=") | not)][1] // ""' <<<"$cc_planned" 2>/dev/null || true)
+cc_mode=$(jq -r '. as $a | ($a|index("--permission-mode")) as $i | if $i == null then "" else $a[$i+1] end' <<<"$cc_planned" 2>/dev/null || true)
+cc_mod=$(jq -r '. as $a | ($a|index("--mod")) as $i | if $i == null then "" else $a[$i+1] end' <<<"$cc_planned" 2>/dev/null || true)
+in_out "dry-run command code: plans the member tab" "+ herdr-app do tab.new" "$out"
+(( rc == 0 )) && [[ "$cc_program" == cmd && "$cc_mode" == yolo && -n "$cc_mod" ]] && pass "dry-run command code: planned argv is cmd in yolo with --mod" || flunk "dry-run command code: argv ($cc_planned)"
+in_out "dry-run command code: keeps the model" '"--model","claude-sonnet-5-5"' "$cc_planned"
+in_out "dry-run command code: keeps the effort" '"--effort","high"' "$cc_planned"
+[[ -f "$cc_mod" ]] && pass "dry-run command code: writes the mod it plans" || flunk "dry-run command code: no mod at $cc_mod"
+printf '%s\n' "$cc_planned" | jq -e 'index("--agents") == null and index("--settings") == null and index("--standalone") == null and (any(.[]; . == "claude" or . == "opencode") | not)' >/dev/null 2>&1 \
+  && pass "dry-run command code: no Claude or OpenCode flags" || flunk "dry-run command code: foreign flags ($cc_planned)"
+reset
+
 echo
 if (( fails == 0 )); then echo "ALL PASS"; else echo "$fails FAILED"; exit 1; fi

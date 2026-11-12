@@ -108,18 +108,23 @@ DESCRIPTION
 
 ARGUMENTS
   ROLE    all, a rank (lead, manager, member, inspector), or a job (driver, navigator, ...)
-  AGENT   claude, or opencode (OpenCode 2). Job settings override rank defaults.
+  AGENT   claude, opencode (OpenCode 2), or command-code. Job settings override rank defaults.
 
 OPTIONS
   --interactive       Wizard. Lists models, and the variants of the chosen model.
   --show              Print the effective settings and change nothing.
-  --model MODEL       Model name, or 'inherit' for the agent default.
+  --model MODEL       Model name, or 'inherit' for the agent default. A Command Code
+                      model is the exact id from 'cmd --list-models': it may be
+                      provider/model or a plain id such as gpt-6-astra.
   --effort EFFORT     low, medium, high, xhigh, max, or 'inherit'. An OpenCode
-                      effort selects a variant the explicit model supports.
+                      effort selects a variant the explicit model supports. A
+                      Command Code effort is off, low, medium, high, xhigh or max,
+                      and it needs an explicit --model.
 
 EXAMPLES
   herdr-crew configure
   herdr-crew configure driver opencode --model provider/model --effort high
+  herdr-crew configure driver command-code --model deepseek/deepseek-v4.1-flash --effort high
   herdr-crew configure --show
 EOF
 }

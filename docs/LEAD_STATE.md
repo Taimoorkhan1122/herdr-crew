@@ -1,6 +1,20 @@
 # Lead state and session checkpoint
 
-## Active checkpoint: herdr-core and herdr-app migration implemented on a local branch
+## Active checkpoint: Command Code runtime adapter; PR #10 review fixes applied
+
+Updated: 2026-11-11 (Asia/Karachi). Branch `feat/command-code-adapter`, based on `main` at 3a70672 (`feat: migrate runtime to herdr-core and herdr-app (#8)`). The PR #10 review fixes are committed in this update and pushed to the PR branch. The user authorized the PR update; no merge is authorized. Untracked `.commandcode/` and `HANDOFF.md` are preserved and excluded.
+
+Objective and authorized scope: address the three PR Lens findings on PR #10 and update the pull request. Fixes: remove the unused `runtime_effort_is_model_variant` helper; broaden the generated mod's Git matcher to consume any leading global option and its value; switch `onSessionStart` to `getActiveTools()` with explicit reporting instead of a silent catch. Files: `bin/crew`, `lib/agent-config.sh`, `test/agent-config.sh`, README, features, ADR 0026, STATE, PROGRESS, this checkpoint. The broader adapter scope remains as previously authorized. No new adapter behavior beyond the review fixes.
+
+Completed: the three review fixes above plus a Node-guarded regression that executes the generated member mod for the matcher cases, the `getActiveTools` keep list and the unreadable-list notice. Checks: `bash -n` on `bin/crew`, `lib/agent-config.sh` and `test/agent-config.sh`; `test/agent-config.sh` exits 0 with ALL PASS, including the executed-mod check. No live acceptance rerun; the previous headless `cmd` 1.88.5 evidence still stands.
+
+Work in hand: push the review-fix commit to `feat/command-code-adapter` and confirm PR #10 shows the new head. No delegated task or test process remains. Do not touch `~/.local/bin/herdr-crew`, `~/.agents/skills/herdr-crew`, `.commandcode/`, or the downstream project.
+
+Limits: no interactive crew or Herdr pane launch on Command Code, so readiness, brief delivery, tab lifecycle and restart in a real pane remain live gaps. Manager/inspector no-write covers native file tools, not shell redirection; member Git denial remains command-pattern based, so aliases or nested wrappers can evade it; the context warning can be unavailable; completion stays explicit through `mark`/`handoff`; there is no Monitor tool.
+
+Next: 1) confirm the push and PR head with `gh pr view 10 --json headRefOid,url`. 2) Do not merge. A live interactive acceptance run needs separate authorization.
+
+## Historical checkpoint: herdr-core and herdr-app migration implemented on a local branch
 
 Updated: 2026-11-03 20:25 PKT (Asia/Karachi). Implementation branch `feat/herdr-core-app-runtime` is pushed at e9ad478. PR #8 is open at https://github.com/Taimoorkhan1122/herdr-crew/pull/8 and is stacked on the research branch. The research branch `docs/herdr-core-app-migration-research` is pushed at 42a8f5f and PR #7 is open at https://github.com/Taimoorkhan1122/herdr-crew/pull/7. No merge, installation or live launch is authorized.
 
