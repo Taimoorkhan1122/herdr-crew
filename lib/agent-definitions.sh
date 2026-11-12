@@ -16,7 +16,8 @@ definitions_load() {
         (.profile | . == "lead" or . == "manager" or . == "member" or . == "inspector") and
         (if (["crew-lead","crew-manager","crew-member","crew-inspector"] | index($id)) then
           $id == ("crew-" + .profile) and
-          (keys - ["name","description","profile","tools","disallowedTools","permissionMode","model","effort","kind","skills","axi"] | length == 0)
+          (keys - ["name","description","profile","tools","disallowedTools","permissionMode","model","effort","kind","skills","axi"] | length == 0) and
+          (if has("kind") then (.kind == "claude" or .kind == "opencode" or .kind == "command-code") else true end)
         else
           (keys - ["name","description","profile","skills","axi","effort"] | length == 0)
         end) and

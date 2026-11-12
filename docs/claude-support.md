@@ -4,7 +4,7 @@ Claude Code is the default runtime for herdr-crew. The launcher starts each role
 
 ## Requirements
 
-- **Claude Code** must be on PATH and authenticated. Mixed-agent teams that also use OpenCode need both CLIs on PATH, authenticated separately.
+- **Claude Code** must be on PATH and authenticated. Mixed-agent teams that also use OpenCode or Command Code need each selected CLI on PATH, authenticated separately.
 - The default installation registers tsk with Claude Code: run `tsk setup claude` once. `tsk setup herdr` and `herdr server reload-config` no longer apply.
 - The Manager requires the `caveman:caveman` plugin skill. `install-skills --check` does not detect this requirement, so install it separately before launching a crew.
 
@@ -40,7 +40,7 @@ The handoff is saved to `~/.herdr/crew/<slug>/handoff-<agent>.md`, and the task 
 
 ## Skills
 
-`install-skills` checks and installs the persona skills for Claude. Claude plugin skills are not automatically portable to OpenCode. The Manager's `caveman:caveman` plugin skill and several domain skills with `UNKNOWN` sources need manual installation; see [Troubleshooting](./troubleshooting.md#skills-with-unknown-sources).
+`install-skills` checks and installs the persona skills for Claude. Claude plugin skills are not automatically portable to other runtimes. The Manager's `caveman:caveman` plugin skill and several domain skills with `UNKNOWN` sources need manual installation; see [Troubleshooting](./troubleshooting.md#skills-with-unknown-sources).
 
 ## Known Claude-specific gaps
 
@@ -48,4 +48,4 @@ The handoff is saved to `~/.herdr/crew/<slug>/handoff-<agent>.md`, and the task 
 - A busy Lead or Manager message can be undelivered with exit 0. Read the delivery output and preserve important questions in tsk.
 - A startup warning does not prove a prompt was lost. Inspect the pane and recorded messages before sending anything again.
 
-For the complete limit list, see [Troubleshooting](./troubleshooting.md). For OpenCode behavior, see [OpenCode 2 support](./opencode-support.md).
+For the complete limit list, see [Troubleshooting](./troubleshooting.md). For OpenCode behavior, see [OpenCode 2 support](./opencode-support.md). For Command Code, see [Command Code support](./command-code-support.md).

@@ -301,6 +301,55 @@ SH
   chmod +x "$fake/hc" "$fake/herdr-app" "$fake/sleep"
 }
 
+# install_fake_cmd FAKE STATE: the Command Code stand-in. It answers only --version
+# (from STATE/cmd-version, so a check can switch it) and --list-models (a table shaped
+# like the real one: blank line, "Available models" header, category headers, then
+# "<model id>  <description>" rows). Anything else is an error: this binary never starts
+# a session. Calls go to STATE/cmd.log so a test can prove that too. Both paths are
+# embedded, so a later install_fake_runtime that re-exports STATE cannot break it.
+install_fake_cmd() {
+  if [[ $# != 2 ]]; then
+    printf 'usage: install_fake_cmd FAKE STATE\n' >&2
+    return 2
+  fi
+
+  local fake=$1 state=$2 qstate
+  mkdir -p "$fake" "$state"
+  printf '%s\n' "${CREW_FAKE_CMD_VERSION:-1.88.5}" >"$state/cmd-version"
+  printf -v qstate '%q' "$state"
+  cat >"$fake/cmd" <<SH
+#!/usr/bin/env bash
+# Command Code stand-in: metadata only, no session, no prompt.
+set -u
+STATE=$qstate
+log() { printf '%s\n' "\$*" >>"\$STATE/cmd.log"; }
+case "\${1:-}" in
+  --version)
+    log 'cmd --version'
+    cat "\$STATE/cmd-version"
+    ;;
+  --list-models)
+    log 'cmd --list-models'
+    cat <<'TABLE'
+Available models
+
+  Recommended
+    deepseek/deepseek-v4.1-flash      Fast and inexpensive
+    claude-sonnet-5-5                 Balanced general purpose
+
+  Legacy
+    claude-opus-4-1                   Previous generation
+TABLE
+    ;;
+  *)
+    log "cmd \$* (unsupported: the fake never starts a session)"
+    exit 99
+    ;;
+esac
+SH
+  chmod +x "$fake/cmd"
+}
+
 # Model an earlier team leaving its terminals before a subsequent launch.
 retire_fake_task() {
   local task=$1 file terminal

@@ -20,7 +20,7 @@ No. Runtime commands need a desktop session and a running app window. Headless u
 
 ## Which coding agents can run in a crew?
 
-Claude Code is the default. OpenCode 2 is supported for roles assigned to it. Codex, Gemini and other agent kinds need permission and lifecycle adapters before they can be selected; unsupported selections fail explicitly. See [OpenCode 2 support](./opencode-support.md).
+Claude Code is the default. OpenCode 2 and Command Code 1.88.5 or later are supported for roles assigned to them. Codex, Gemini and other agent kinds need permission and lifecycle adapters before they can be selected; unsupported selections fail explicitly. See [OpenCode 2 support](./opencode-support.md) and [Command Code support](./command-code-support.md).
 
 ## Does herdr-crew push or merge my changes?
 

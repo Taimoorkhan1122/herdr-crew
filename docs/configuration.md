@@ -27,16 +27,17 @@ Run the setup in your project directory:
 herdr-crew configure
 ```
 
-It lists installed supported CLIs and asks for a role and agent. For OpenCode it reads the project's available model catalog: choose a number, enter a full model ID, or type a search term, then choose one of that model's effort variants. Blank or `0` keeps the runtime default; models without variants skip the effort question. Claude keeps its model/effort prompts. Choose `all` to set the four rank defaults, then add individual job overrides. Existing job overrides remain in place. The wizard saves once at the end; EOF cancels its pending changes. For scripts or direct changes:
+It lists installed supported CLIs and asks for a role and agent. For OpenCode and Command Code it reads the project's available model catalog: choose a number, enter a full model ID, or type a search term. For OpenCode you then choose one of that model's effort variants, and models without variants skip the effort question. Blank or `0` keeps the runtime default. Command Code model IDs carry no `#variant`, so effort is a separate value there. Claude keeps its model/effort prompts. Choose `all` to set the four rank defaults, then add individual job overrides. Existing job overrides remain in place. The wizard saves once at the end; EOF cancels its pending changes. For scripts or direct changes:
 
 ```bash
 herdr-crew configure all claude
 herdr-crew configure driver opencode --model provider/model --effort high
+herdr-crew configure tester command-code --model claude-sonnet-5-5 --effort high
 herdr-crew configure code-reviewer claude --model inherit --effort high
 herdr-crew configure --show
 ```
 
-Replace `provider/model` with a model available in your authenticated OpenCode installation. Supported agents are `claude` and `opencode` (version 2). Other agent kinds, including Codex and Gemini, need permission/lifecycle adapters before they can be selected. Unsupported selections fail explicitly.
+Replace `provider/model` with a model available in your authenticated OpenCode installation, and `claude-sonnet-5-5` with an ID that `cmd --list-models` prints. Supported agents are `claude`, `opencode` (version 2) and `command-code`. The configuration token is exactly `command-code`; the executable is `cmd`, and the product is also written command-code or commandcode, but those spellings belong in your shell and your prompt, not in `config.json`. Other agent kinds, including Codex and Gemini, need permission/lifecycle adapters before they can be selected. Unsupported selections fail explicitly.
 
 Runtime assignments live in `.herdr-crew/config.json` in the primary project checkout. Each project's linked worker worktrees read that same file, including uncommitted configuration edits. For a manually entered linked checkout with separate Git metadata that does not identify its primary working directory, set `CREW_REPO` to the primary project directory; crew-created workers already receive it. Ambiguous checkout discovery fails rather than writing into Git metadata. You can commit it to share assignments, or keep it local. It contains agent/model settings, never credentials:
 
@@ -45,18 +46,23 @@ Runtime assignments live in `.herdr-crew/config.json` in the primary project che
   "version": 1,
   "roles": {
     "member": { "agent": "claude", "model": "haiku" },
-    "driver": { "agent": "opencode", "model": "provider/model" }
+    "driver": { "agent": "opencode", "model": "provider/model" },
+    "tester": { "agent": "command-code", "model": "claude-sonnet-5-5", "effort": "high" }
   }
 }
 ```
 
 Valid keys are `lead`, `manager`, `member`, `inspector`, and the job personas below. Job settings override their rank; project settings override the bundled defaults. Changing agent clears inherited model/effort values from the previous runtime. With the same agent, omitted model/effort retains the inherited setting; changing an OpenCode model clears its inherited variant because variants belong to that model; `inherit` explicitly uses that agent's own default. For OpenCode, `--effort` selects a catalog variant of the explicit `--model`; supported names vary by model, so an unsupported choice fails without saving. Keep the variant in `effort`, rather than embedding `#variant` in the model field. The adapter writes the native `#variant` only on the crew agent selection, because OpenCode's root model default drops variants. The wizard and explicit OpenCode efforts query `opencode api --standalone model.list` in the primary checkout; this uses a private metadata server, creates no agent session and submits no model prompt. Catalog errors cancel setup without writing pending changes. Deleting a role entry restores inheritance. Without a config file, the existing Claude defaults apply. There are no user-wide overrides.
 
-Selection changes apply to new launches. Restart keeps the saved agent/model/effort in the same terminal; it does not migrate a running session to another agent. Configure and `--show` need no app window or tsk. Launch preflight checks the selected executables and OpenCode major version before creating tasks, worktrees or panes.
+For Command Code, `--model` is the exact ID that `cmd --list-models` prints. Command Code IDs may be `provider/model` or plain, such as `claude-sonnet-5-5`, and they have no `#variant` form: keep any effort in `effort` and never append it to the model string. The adapter checks the ID against that catalog and caches the response for one day at `~/.herdr/crew/command-code-models`. If the catalog cannot be read, it prints a warning and falls back to checking the ID's syntax, so an offline machine can still save an assignment that the runtime later rejects.
+
+Selection changes apply to new launches. Restart keeps the saved agent/model/effort in the same terminal; it does not migrate a running session to another agent. Configure and `--show` need no app window or tsk. Launch preflight checks the selected executables, the OpenCode major version, and the Command Code minimum version (1.88.5) before creating tasks, worktrees or panes.
 
 OpenCode receives a per-pane native role policy and runs with `--standalone`. Read-only ranks retain their command allowlists; members have edit/shell access and explicit Git push/merge denies. Subagents are disabled to prevent a broader helper policy bypassing the rank. Member access outside the working directory may ask for approval. Managed runtime configuration and trusted plugins remain part of the runtime's trust boundary.
 
-Claude keeps its hooks, Skill/Explore and Monitor workflow. OpenCode uses portable skills and bounded shell waits; automatic crew context warnings and asynchronous Monitor wakeups are unavailable. It reports these limits and hands off before compaction. Claude plugin skills are not automatically portable. The current `install-skills` installer still targets Claude; install portable skills for OpenCode through its normal skill installation paths. The generated brief identifies the verified crew installation path. Runtime policy enforcement and full cross-agent orchestration still need live acceptance; automated fixtures are not that evidence.
+Command Code receives a per-session TypeScript mod. The launcher writes the mod to a file and starts `cmd` with `-n`, `--model`, `--effort`, `--permission-mode`, `--skip-onboarding`, `--no-auto-update` and `--mod`; the bundled jiti compiles that file inside the session. The mod appends the crew rank and runtime policy to the system prompt and hooks `beforeToolCall`, `onPermissionRequest`, `afterToolCall` and `onSessionStart`. Inspectors run with `--permission-mode plan`; the lead, manager and member run with `yolo`, and the mod's deny rules still win there. Native `write_file` and `edit_file` are blocked for the manager and inspector, member `git push`/`git merge`/`gh pr merge` commands are blocked, and `onSessionStart` removes the `agent` and `agent_output` tools. See [Command Code support](./command-code-support.md).
+
+Claude keeps its hooks, Skill/Explore and Monitor workflow. OpenCode uses portable skills and bounded shell waits; automatic crew context warnings and asynchronous Monitor wakeups are unavailable. Command Code has no Monitor wakeup and no transcript hook either; its warning is best-effort and depends on the runtime reporting a token count. Each reports its limits and hands off before compaction. Claude plugin skills are not automatically portable. The current `install-skills` installer still targets Claude; install portable skills for OpenCode and Command Code through their normal skill installation paths. The generated brief identifies the verified crew installation path. Runtime policy enforcement and full cross-agent orchestration still need live acceptance; automated fixtures are not that evidence.
 
 ## Add a project agent
 
@@ -98,3 +104,7 @@ Prefer `herdr-crew configure` for project-specific changes. Editing bundled file
 ## Run a rank on OpenCode
 
 Use `herdr-crew configure <rank-or-job> opencode --model provider/model`. OpenCode 2 is required. Existing OpenCode sessions without saved native-policy metadata must be relaunched rather than restarted. See [OpenCode 2 support](./opencode-support.md) for the runtime and permission details.
+
+## Run a rank on Command Code
+
+Use `herdr-crew configure <rank-or-job> command-code --model <exact model id> [--effort <level>]`. Command Code 1.88.5 or later is required, and the model ID must come from `cmd --list-models`. There is no `#variant`, so effort stays in its own field. Restart reuses the saved argv and mod file, so a change to the adapter's policy reaches new launches only. See [Command Code support](./command-code-support.md).

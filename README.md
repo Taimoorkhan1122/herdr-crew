@@ -2,9 +2,9 @@
 
 ![Pixel-art HERDR-CREW command hub: Lead and Manager coordinate engineering, testing, API builds, and investigation around a shared task board.](docs/assets/herdr-crew-banner-landscape.png)
 
-**herdr-crew is a Claude Code skill that launches a multi-agent development crew inside Herdr.** One command starts a Lead agent that talks to you, a Manager agent that opens worker teams, and a shared task board (tsk). Development teams work in isolated Git worktrees, write code test-first, review their own work, and leave a branch for you to merge. The investigation team reads the current repository without a new branch or worktree.
+**herdr-crew is a Claude Code skill that launches a multi-agent development crew inside Herdr, with optional roles on OpenCode 2 and Command Code.** One command starts a Lead agent that talks to you, a Manager agent that opens worker teams, and a shared task board (tsk). Development teams work in isolated Git worktrees, write code test-first, review their own work, and leave a branch for you to merge. The investigation team reads the current repository without a new branch or worktree.
 
-This is the Claude Code skill and launcher, not the Rust `herdr` plugin that shares the name. See [how the two projects differ](docs/comparison.md).
+This is the skill and launcher, not the Rust `herdr` plugin that shares the name. See [how the two projects differ](docs/comparison.md).
 
 **Experimental:** automated launcher checks pass, but full live development acceptance is pending. See [known limitations](#known-limitations) and [verification status](docs/STATE.md).
 
@@ -53,7 +53,7 @@ Agents talk with `herdr-crew say <agent> "<message>"` and report with `herdr-cre
 
 - **herdr-app**, the desktop app, and **herdr-core** (`hc`) on your PATH. The app owns spaces, tabs and panes. `hc` owns send, read, wait, status and kill. Crew control actions address saved terminal IDs. Install both from <https://herdr.dev/download>; the app installer also installs `herdr-core` when it is missing. Supported desktops are Apple Silicon macOS, Linux x86-64 or ARM64 with Vulkan, and Windows x64.
 - **A desktop session.** `launch`, `team`, `say`, `mark`, `status`, `watch`, `close` and `restart` need a running app window that answers `herdr-app status`. A server, container or CI runner without a desktop session cannot run them. `help`, `--version`, `completion`, `init`, `upgrade` and `configure` still work without the app.
-- **Claude Code** (the default), or **OpenCode 2** for roles assigned to it. Mixed-agent teams need both selected CLIs on PATH. Authenticate each CLI separately before launching a crew.
+- **A CLI for every role you assign**: **Claude Code** (the default), **OpenCode 2**, or **Command Code** (`cmd`, version 1.88.5 or later). Mixed-agent teams need each selected CLI on PATH. Authenticate each CLI separately before launching a crew; the launcher does not check credentials or model access.
 - **tsk**, the task board. Install it with `brew install smarzban/tap/tsk`, then run `tsk setup claude` once to register tsk with Claude Code. The board is a plain `tsk` terminal in the crew tab. `tsk setup herdr` and `herdr server reload-config` no longer apply.
 - **jq**, **git**, **rg** (ripgrep), and **shasum**. The launcher uses rg for visible-paste detection and shasum for the repository slug.
 - **npm**, only if you want `install-skills` to install the AXI tools.
@@ -98,6 +98,7 @@ The [quick start guide](docs/quickstart.md) covers every step, including the man
 | [Reference](docs/reference.md) | Profiles, personas, teams, commands, output, environment variables, AXI tools |
 | [Claude Code support](docs/claude-support.md) | Default runtime, hooks, Monitor, Explore, context budget |
 | [OpenCode 2 support](docs/opencode-support.md) | Model selection, permissions, skills and limits |
+| [Command Code support](docs/command-code-support.md) | Session mod, models, permissions and context warning |
 | [Troubleshooting](docs/troubleshooting.md) | Known limitations and failure modes |
 | [FAQ](docs/faq.md) | Short answers before installing |
 | [Comparison](docs/comparison.md) | This project vs the Rust Herdr plugin of the same name |
@@ -111,7 +112,7 @@ The [quick start guide](docs/quickstart.md) covers every step, including the man
 
 **Does herdr-crew push or merge my changes?** No. Merging is your decision, crew instructions require approval, and member sessions have explicit Bash denies for `git push` and `git merge`.
 
-**Can I run OpenCode instead of Claude Code?** Yes, OpenCode 2 is supported per role. Codex, Gemini and other agent kinds need permission and lifecycle adapters. See [OpenCode 2 support](docs/opencode-support.md).
+**Which coding agents can run?** Claude Code (the default), OpenCode 2, and Command Code 1.88.5 or later, assigned per role. Codex, Gemini and other agent kinds need permission and lifecycle adapters. See [OpenCode 2 support](docs/opencode-support.md) and [Command Code support](docs/command-code-support.md).
 
 The [FAQ](docs/faq.md) answers more questions about worktrees, state, context limits and Windows.
 
@@ -122,6 +123,9 @@ The [FAQ](docs/faq.md) answers more questions about worktrees, state, context li
 - Worktrees are never removed automatically. Run the removal command that `close` prints.
 - Unverified on this runtime: an app restart with live terminals, pane title behavior, the split ratio, headless use, and a real permission-blocked agent. No live crew has run since the migration.
 - Visual planning has automated launch/instruction checks and a browser-checked example. Live Lead/planner approval, revision, offline fallback and restart acceptance remain pending.
+- Command Code enforcement is native tool hooks and command patterns, not an operating-system sandbox. A manager or inspector shell command can still write files by redirection, and an alias or wrapper around `git push` can evade the member block.
+- Command Code has no transcript hook and no asynchronous Monitor tool. Its context warning is best-effort; a live run reported no token count, so the warning may not fire.
+- The Command Code model catalog's offline fallback validates syntax only, so it can accept an ID that the runtime later rejects.
 
 The [troubleshooting guide](docs/troubleshooting.md) covers every limitation, including message delivery, tab titles, `tsk` step rules, custom project jobs and skills with `UNKNOWN` sources.
 

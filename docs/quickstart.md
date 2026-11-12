@@ -10,7 +10,7 @@ You need:
 
 - **herdr-app** and **herdr-core** (`hc`) on your PATH. Install both from <https://herdr.dev/download>; the app installer also installs `herdr-core` when it is missing. Supported desktops are Apple Silicon macOS, Linux x86-64 or ARM64 with Vulkan, and Windows x64.
 - **A desktop session.** `launch`, `team`, `say`, `mark`, `status`, `watch`, `close` and `restart` need a running app window that answers `herdr-app status`. A server, container or CI runner without a desktop session cannot run them.
-- **Claude Code** (the default), or **OpenCode 2** for roles assigned to it. Mixed-agent teams need both selected CLIs on PATH.
+- **A CLI for every role you assign**: **Claude Code** (the default), **OpenCode 2**, or **Command Code** (`cmd`, version 1.88.5 or later). Mixed-agent teams need each selected CLI on PATH. Authenticate each CLI separately before launching a crew; the launcher does not check credentials or model access.
 - **tsk**, the task board: `brew install smarzban/tap/tsk`, then run `tsk setup claude` once to register tsk with Claude Code.
 - **jq**, **git**, **rg** (ripgrep), and **shasum**.
 - **npm**, only if you want `install-skills` to install the AXI tools.

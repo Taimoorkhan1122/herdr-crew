@@ -10,6 +10,7 @@ This folder holds two kinds of material: user guides for running a crew, and pro
 - `reference.md`: profiles, personas, teams, commands, output, environment variables and AXI tools.
 - `claude-support.md`: Claude Code behavior, hooks, Monitor, Explore and the context budget.
 - `opencode-support.md`: OpenCode 2 model selection, permissions and limits.
+- `command-code-support.md`: Command Code models, session mod, permissions and context warning.
 - `troubleshooting.md`: known limitations and failure modes.
 - `faq.md`: short answers for people evaluating the project.
 - `comparison.md`: this project versus the Rust Herdr plugin of the same name.

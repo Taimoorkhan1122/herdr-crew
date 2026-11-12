@@ -1,6 +1,6 @@
 # OpenCode 2 support in herdr-crew
 
-herdr-crew can run a role on OpenCode 2 instead of Claude Code. Supported agents are `claude` and `opencode` (version 2). Other agent kinds, including Codex and Gemini, need permission/lifecycle adapters before they can be selected. Unsupported selections fail explicitly.
+herdr-crew can run a role on OpenCode 2 instead of Claude Code. Supported agents are `claude`, `opencode` (version 2) and `command-code`. Other agent kinds, including Codex and Gemini, need permission/lifecycle adapters before they can be selected. Unsupported selections fail explicitly. See [Command Code support](./command-code-support.md) for the third runtime.
 
 ## Select OpenCode for a rank or job
 
@@ -38,4 +38,4 @@ Claude plugin skills are not automatically portable. The current `install-skills
 
 Runtime policy enforcement and full cross-agent orchestration still need live acceptance; automated fixtures are not that evidence.
 
-For Claude-specific behavior, see [Claude Code support](./claude-support.md). For configuration and inheritance rules, see [Configuring herdr-crew](./configuration.md#configure-runtime-assignments).
+For Claude-specific behavior, see [Claude Code support](./claude-support.md). For configuration and inheritance rules, see [Configuring herdr-crew](./configuration.md#configure-runtime-assignments). For Command Code, see [Command Code support](./command-code-support.md).

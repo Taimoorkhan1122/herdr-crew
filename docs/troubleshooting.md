@@ -12,7 +12,7 @@ Restart reuses the terminal only after a normal agent exit. After `hc kill`, or 
 
 ## An agent answers /exit as a chat message
 
-`hc` adds `<hc from="...">` note framing when an agent terminal sends to its parent. An older build sent `/exit` through that path, so the agent replied instead of exiting and restart timed out. Current `bin/crew` drops the caller identity for literal input: `/exit`, the saved command, briefs and `say` messages. If an agent receives `/exit` as a message, update the installed launcher. See [ADR 0026](adr/0026-literal-sends-drop-agent-identity.md).
+`hc` adds `<hc from="...">` note framing when an agent terminal sends to its parent. An older build sent `/exit` through that path, so the agent replied instead of exiting and restart timed out. Current `bin/crew` drops the caller identity for literal input: `/exit`, the saved command, briefs and `say` messages. If an agent receives `/exit` as a message, update the installed launcher. See [ADR 0027](adr/0027-literal-sends-drop-agent-identity.md).
 
 ## A message was not delivered
 
@@ -63,6 +63,18 @@ Automatic completion result delivery is not connected to a runtime hook. Agents 
 ## Custom project jobs are only fixture-tested
 
 Custom project jobs have fixture-based launch coverage; native permission enforcement and live launches remain unverified.
+
+## Command Code permissions are not an OS sandbox
+
+Command Code enforcement is native tool hooks and command patterns. A manager or inspector shell command can still write files by redirection, and an alias or wrapper around `git push` can evade the member block. Ranks the mod does not name rely on their injected policy. See [Command Code support](./command-code-support.md).
+
+## Command Code context warnings are best-effort
+
+Command Code has no transcript hook and no asynchronous Monitor tool. `afterToolCall` reads `cmd.getContextUsage()` and injects one handoff instruction at `CREW_CTX_LIMIT`, but a live free-model run returned `tokens: null`, so the warning did not fire. Monitor context and hand off before compaction.
+
+## The Command Code model catalog can be offline or stale
+
+The adapter caches `cmd --list-models` for one day at `~/.herdr/crew/command-code-models`. If the catalog cannot be read, it warns and checks syntax only, so it can accept an ID that the runtime later rejects. Command Code 1.88.5 or later is required.
 
 ## Skills with UNKNOWN sources
 

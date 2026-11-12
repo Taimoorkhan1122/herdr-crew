@@ -1,4 +1,4 @@
-# 0026. Drop the caller agent identity for literal terminal input
+# 0027. Drop the caller agent identity for literal terminal input
 
 - Status: Accepted
 - Date: 2026-11-12

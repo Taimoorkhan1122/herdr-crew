@@ -39,6 +39,8 @@ exit 0
 SH
 chmod +x "$TMP/fake/"*
 install_fake_runtime "$TMP/fake" "$STATE"
+# Command Code stand-in: --version and --list-models only, never a session.
+install_fake_cmd "$TMP/fake" "$STATE"
 touch "$STATE/auto-ready"
 export PATH="$TMP/fake:$PATH"
 cd "$CREW_REPO" || exit 1
@@ -115,5 +117,46 @@ label='fresh launch uses changed project inspector guidance'
 run team payments T10 'inspect payments again'
 app_log > "$TMP/fresh-app-log.json"
 check bash -c '[[ "$1" == 0 ]] && jq -e '\''[.[] | select(.[0] == "herdr-app" and .[1] == "do" and (.[2] == "tab.new" or .[2] == "pane.split")) | . as $call | ($call|index("--argv")) as $i | ($call[$i+1]|fromjson)[] | select(startswith("OPENCODE_CONFIG_CONTENT=")) | sub("^OPENCODE_CONFIG_CONTENT=";"") | fromjson | .agents.crew.system | select(contains("CUSTOM PAYMENT REVIEW CHANGED"))] | length > 0'\'' "$2" >/dev/null' _ "$rc" "$TMP/fresh-app-log.json"
+
+# Command Code: the project inspector is configured through the fake --list-models catalog
+# and starts with --permission-mode plan and a generated mod, not Claude/OpenCode flags.
+printf '%s\n' 'CUSTOM PAYMENT REVIEW ORIGINAL' > "$CREW_REPO/.herdr-crew/agents/payments-reviewer/AGENTS.md"
+label='configure accepts a Command Code project inspector from the model catalog'
+run configure payments-reviewer command-code --model deepseek/deepseek-v4.1-flash
+check bash -c '[[ "$1" == 0 ]] && jq -e '\''.roles["payments-reviewer"] == {agent:"command-code",model:"deepseek/deepseek-v4.1-flash"}'\'' "$2" >/dev/null' _ "$rc" "$CREW_REPO/.herdr-crew/config.json"
+app_agent_argv() {
+  app_log -r --arg agent "CREW_AGENT=$1" '[.[] | select(.[0] == "herdr-app" and .[1] == "do" and (.[2] == "tab.new" or .[2] == "pane.split")) | . as $call | ($call|index("--argv")) as $i | ($call[$i+1]|fromjson) | select(any(.[]; . == $agent))][0] // empty'
+}
+argv_field() { jq -r --arg flag "$2" '. as $a | ($a|index($flag)) as $i | if $i == null then "" else $a[$i+1] end' <<<"$1"; }
+cc_inspector_argv_ok() {
+  local argv=$1 program mode mod
+  program=$(jq -r '[.[] | select(test("^[A-Za-z_][A-Za-z0-9_]*=") | not)][1] // ""' <<<"$argv")
+  mode=$(argv_field "$argv" --permission-mode)
+  mod=$(argv_field "$argv" --mod)
+  [[ "$program" == cmd && "$mode" == plan && -n "$mod" && -f "$mod" ]] || return 1
+  jq -e 'index("--agents") == null and index("--settings") == null and index("--standalone") == null and (any(.[]; . == "claude" or . == "opencode") | not)' <<<"$argv" >/dev/null
+}
+label='Command Code project inspector runs cmd in plan mode with a generated mod'
+run team payments T11 'inspect payments'
+cc_argv=$(app_agent_argv fixture-t11-payments-reviewer)
+check cc_inspector_argv_ok "$cc_argv"
+cc_meta="$HOME/.herdr/crew/fixture/fixture-t11-payments-reviewer.meta"
+label='Command Code mod injects the project guidance and runtime guidance'
+check bash -c 'mod=$(jq -r '\''. as $a | ($a|index("--mod")) as $i | if $i == null then "" else $a[$i+1] end'\'' <<<"$1") && grep -q "CUSTOM PAYMENT REVIEW ORIGINAL" "$mod" && grep -q "Command Code runtime" "$mod"' _ "$cc_argv"
+label='Command Code inspector saves the project definition and a Command Code brief'
+check bash -c '[[ "$1" == 0 ]] && grep -q "CUSTOM PAYMENT REVIEW ORIGINAL" "$HOME/.herdr/crew/fixture/fixture-t11-payments-reviewer.definition" && grep -q "Command Code runtime" "$HOME/.herdr/crew/fixture/fixture-t11-payments-reviewer.brief" && grep -q "inspect payments" "$HOME/.herdr/crew/fixture/fixture-t11-payments-reviewer.brief" && ! grep -q "A hook warns you" "$HOME/.herdr/crew/fixture/fixture-t11-payments-reviewer.brief"' _ "$rc"
+label='Command Code inspector stores only an explicit completion snapshot'
+check bash -c '[[ -z $(sed -n "s/^context_hook=//p" "$1") && -f $(sed -n "s/^completion_hook=//p" "$1") ]]' _ "$cc_meta"
+printf '%s\n' 'CUSTOM PAYMENT REVIEW CHANGED' > "$CREW_REPO/.herdr-crew/agents/payments-reviewer/AGENTS.md"
+label='saved Command Code definition keeps the guidance it launched with'
+check grep -q "CUSTOM PAYMENT REVIEW ORIGINAL" "$HOME/.herdr/crew/fixture/fixture-t11-payments-reviewer.definition"
+label='fresh Command Code launch uses changed project inspector guidance'
+run team payments T12 'inspect payments again'
+cc_fresh_argv=$(app_agent_argv fixture-t12-payments-reviewer)
+check bash -c '[[ "$1" == 0 ]] && grep -q "CUSTOM PAYMENT REVIEW CHANGED" "$HOME/.herdr/crew/fixture/fixture-t12-payments-reviewer.definition" && ! grep -q "CUSTOM PAYMENT REVIEW ORIGINAL" "$HOME/.herdr/crew/fixture/fixture-t12-payments-reviewer.definition"' _ "$rc"
+label='fresh Command Code inspector keeps the same cmd plan/mod argv'
+check cc_inspector_argv_ok "$cc_fresh_argv"
+label='fresh Command Code mod injects the changed project guidance'
+check bash -c 'mod=$(jq -r '\''. as $a | ($a|index("--mod")) as $i | if $i == null then "" else $a[$i+1] end'\'' <<<"$1") && grep -q "CUSTOM PAYMENT REVIEW CHANGED" "$mod" && ! grep -q "CUSTOM PAYMENT REVIEW ORIGINAL" "$mod"' _ "$cc_fresh_argv"
 (( fails == 0 )) || { printf '%s checks failed\n' "$fails"; exit 1; }
 printf 'ALL PASS\n'
