@@ -61,6 +61,7 @@ case "$command" in
     ;;
   send)
     terminal=${1:-}; shift || true
+    printf '%s\n' "${HC_TERMINAL_ID-}" >>"$STATE/send-ids"
     has_term "$terminal" || missing
     if [[ $(jq -r '.status // empty' "$STATE/term.$terminal") == blocked ]]; then
       printf '{"error":{"kind":"blocked"}}\n' >&2

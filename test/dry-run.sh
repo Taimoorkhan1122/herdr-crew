@@ -362,12 +362,15 @@ in_out "restart: saved command keeps model bytes" "--model haiku" "$saved_cmd"
 in_out "restart: saved command keeps effort bytes" "--effort high" "$saved_cmd"
 printf 'fixture %% \n' >"$STATE/screen.$restart_term"
 printf 'working\nnull\nworking\nworking\nworking\n' >"$STATE/get-seq.$restart_term"
-rc=0; out=$("$CREW" restart "$S-t7-driver" 2>&1) || rc=$?
+rm -f "$STATE/send-ids"
+rc=0; out=$(HC_TERMINAL_ID=fixture-manager "$CREW" restart "$S-t7-driver" 2>&1) || rc=$?
 (( rc == 0 )) && pass "restart: succeeds" || flunk "restart: rc=$rc ($out)"
 hc_log -e --arg t "$restart_term" --arg saved "$saved_cmd" '
   [.[] | select(.[0:2] == ["hc","send"] and .[2] == $t) | .[3]] as $m
   | ($m | length) == 3 and $m[0] == "/exit" and $m[1] == $saved' >/dev/null \
   && pass "restart: /exit then the saved command in the same terminal" || flunk "restart: wrong terminal or command"
+[[ -f "$STATE/send-ids" ]] && ! rg -q . "$STATE/send-ids" \
+  && pass "restart: drops the caller agent identity on sends" || flunk "restart: hc may wrap /exit as a note"
 hc_log -e --arg t "$restart_term" --arg handoff "Resume from your handoff: $HOME/.herdr/crew/$S/handoff-$S-t7-driver.md" '
   [.[] | select(.[0:2] == ["hc","send"] and .[2] == $t) | .[3]][2] | contains($handoff)' >/dev/null \
   && pass "restart: brief points at the handoff" || flunk "restart: brief has no handoff line"

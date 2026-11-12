@@ -1,5 +1,22 @@
 # herdr-crew docs
 
+This folder holds two kinds of material: user guides for running a crew, and project records that explain how herdr-crew got built and what state it is in.
+
+## User guides
+
+- `quickstart.md`: install the runtime and herdr-crew, then start a first crew.
+- `usage.md`: teams, personas, status, watch, close, visual plans, handoffs and merges.
+- `configuration.md`: project agents, runtime assignments, upgrades and custom teams.
+- `reference.md`: profiles, personas, teams, commands, output, environment variables and AXI tools.
+- `claude-support.md`: Claude Code behavior, hooks, Monitor, Explore and the context budget.
+- `opencode-support.md`: OpenCode 2 model selection, permissions and limits.
+- `troubleshooting.md`: known limitations and failure modes.
+- `faq.md`: short answers for people evaluating the project.
+- `comparison.md`: this project versus the Rust Herdr plugin of the same name.
+- `features.md`: the feature, option, flow and hook reference.
+
+## Project records
+
 These files record how herdr-crew got built, why it is built the way it is, and what state it is in now. Read them in this order when you come back to the project after a break.
 
 - `LEAD_STATE.md`: the active objective, work in hand, approvals, and exact session resume steps. Read it first when taking over work.

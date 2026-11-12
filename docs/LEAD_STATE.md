@@ -1,6 +1,22 @@
 # Lead state and session checkpoint
 
-## Active checkpoint: herdr-core and herdr-app migration implemented on a local branch
+## Active checkpoint: SEO/GEO metadata and documentation split
+
+Updated: 2026-11-12 16:42 PKT (Asia/Karachi). Repository `Taimoorkhan1122/herdr-crew`, branch `main` at 3a70672 tracking `origin/main`; the file changes are uncommitted. Untracked `.commandcode/` and `HANDOFF.md` are preserved.
+
+Objective and authorization: compare the public search and LLM footprint with `rarce/herdr-crew`, then apply the metadata fix and split the README into crawlable pages. The user authorized both. Remote repository metadata is a shared-state change and was included in that authorization. Commit, push and PR are not authorized.
+
+Completed: `gh repo edit` set the repository description and nine topics; `gh api` confirmed them. `README.md` is reduced from 531 to 169 lines with a definitional first paragraph and explicit disambiguation from the Rust `herdr` plugin. Nine user-facing pages were added under `docs/`: `quickstart.md`, `usage.md`, `configuration.md`, `reference.md`, `claude-support.md`, `opencode-support.md`, `troubleshooting.md`, `faq.md` and `comparison.md`. `docs/README.md` now separates user guides from project records.
+
+Also completed: the live restart failure. The Manager's `/exit` reached the Lead as `<hc from="t53">/exit</hc>` because `hc` frames agent-to-parent sends as notes. [ADR 0026](adr/0026-literal-sends-drop-agent-identity.md) records the decision. New `hc_send` in `bin/crew` unsets `HC_TERMINAL_ID` for `/exit`, the saved command, briefs and `say` messages. The installed launcher at `~/.agents/skills/herdr-crew/bin/crew` was patched in place; it is not a git checkout and differs from this repository in other runtime support, so only the send path changed.
+
+Evidence: relative-link and heading-anchor validation over 11 Markdown files printed `ALL LINKS OK`; code-fence counts are even; `git diff --check` exited 0. The restart cause was reproduced with two status-reporting stub terminals: identity set produced `<hc from="...">`, identity unset produced raw text. `test/dry-run.sh` (ALL PASS, including the new identity check), `test/worktrees.sh`, `test/agent-config.sh`, `test/project-launch.sh` and `test/review-regressions.sh` each exited 0. No live restart has run after the fix.
+
+Work in hand: the live crew recovery is pending. The installed launcher is patched, but the running Lead and Manager still need a restart to pass their `/exit` and saved commands through the new path. No live acceptance is claimed.
+
+Next: 1) Restart the Lead and Manager with the patched launcher, then confirm `/exit` returns to the shell and the saved command resumes from the handoff. 2) Review the README, the new pages and ADR 0026. 3) With explicit authorization, commit and push, then open a PR. 4) Optional follow-up from the gap analysis: add `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, issue templates, and frequent semantic releases with notes.
+
+## Historical checkpoint: herdr-core and herdr-app migration implemented on a local branch
 
 Updated: 2026-11-03 20:25 PKT (Asia/Karachi). Implementation branch `feat/herdr-core-app-runtime` is pushed at e9ad478. PR #8 is open at https://github.com/Taimoorkhan1122/herdr-crew/pull/8 and is stacked on the research branch. The research branch `docs/herdr-core-app-migration-research` is pushed at 42a8f5f and PR #7 is open at https://github.com/Taimoorkhan1122/herdr-crew/pull/7. No merge, installation or live launch is authorized.
 

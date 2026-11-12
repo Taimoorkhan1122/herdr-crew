@@ -2,6 +2,19 @@
 
 Newest entries first. Each entry gives the date and what changed.
 
+## 2026-11-12
+
+- Fixed the live restart failure where `/exit` arrived as `<hc from="t53">/exit</hc>` and the agent answered instead of exiting. `hc` adds note framing when an agent terminal messages its parent; there is no per-send raw flag, and a scoped `notes = false` config did not suppress it. New `hc_send` in `bin/crew` unsets `HC_TERMINAL_ID` for literal input while keeping `HC_TERMINAL_SOCKET` and `HC_SOCKET`. It covers `/exit`, the saved command, first/restart briefs and `say` messages. [ADR 0026](adr/0026-literal-sends-drop-agent-identity.md).
+- Reproduced the cause with two status-reporting stub terminals in a parent/child pair: identity set produced `<hc from="t6b probe-child3">NOTETEST2</hc>`; identity unset produced `RAWTEST2`. No model tokens were used, and the probe terminals were removed.
+- Added a hermetic regression: the fake `hc` records `HC_TERMINAL_ID` for each `send`, and the restart test sets it in the launcher environment then asserts every recorded send saw it unset. Updated `docs/features.md`, `docs/usage.md`, `docs/troubleshooting.md` and `docs/STATE.md`.
+- Verification: `/bin/bash -n` on the changed scripts exited 0. `test/dry-run.sh` exited 0 with ALL PASS, including the new check; `test/worktrees.sh`, `test/agent-config.sh`, `test/project-launch.sh` and `test/review-regressions.sh` each exited 0. No live restart has run after the fix.
+- Patched the installed copy at `~/.agents/skills/herdr-crew/bin/crew` in place. It is not a git checkout and differs from this repository in other runtime support, so only the send path was changed. Its syntax check and a dry-run restart plan (`+ hc send t52 /exit`) passed.
+- SEO/GEO pass on the public repository surface, requested after comparing with `rarce/herdr-crew`. Applied a GitHub description and nine topics to `Taimoorkhan1122/herdr-crew` with `gh repo edit`, then verified with `gh api`: `description` is set and `topics` are `agent-orchestration`, `ai-agents`, `bash`, `claude-code`, `claude-code-skill`, `git-worktree`, `herdr`, `multi-agent` and `task-board`. No other remote setting changed.
+- Rewrote `README.md` from 531 to 169 lines: a definitional first paragraph naming Claude Code, multi-agent crews, Herdr, worktrees and tsk; explicit disambiguation from the Rust `herdr` plugin of the same name; a quick start; a documentation index; a four-question FAQ; and condensed limitations that link to the full page.
+- Added user-facing pages `docs/quickstart.md`, `docs/usage.md`, `docs/configuration.md`, `docs/reference.md`, `docs/claude-support.md`, `docs/opencode-support.md`, `docs/troubleshooting.md`, `docs/faq.md` and `docs/comparison.md`, and updated `docs/README.md` to separate user guides from project records. Content is moved or condensed from the prior README; no product behavior changed.
+- Verification: a Python relative-link and heading-anchor check over 11 Markdown files printed `ALL LINKS OK`; code-fence counts are even; `git diff --check` exited 0. No test suite was rerun because only documentation changed. No live acceptance.
+- All file changes are uncommitted on `main`. Commit, push and PR are not authorized.
+
 ## 2026-11-03
 
 - Pushed `feat/herdr-core-app-runtime` at e9ad478 and opened PR #8, stacked on the research branch. No merge, installation or live acceptance.

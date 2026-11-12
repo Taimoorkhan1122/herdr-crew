@@ -293,14 +293,27 @@ wait_ready() {
   return 2
 }
 
+# hc_send TERM TEXT: type literal input. When the caller is an agent terminal, hc
+# wraps a send to its parent as <hc from="...">...</hc>. That framing turns /exit
+# into a chat message and breaks the saved command, so drop the caller identity
+# for control input and briefs. HC_TERMINAL_SOCKET and HC_SOCKET stay set, so the
+# call still reaches the same core.
+hc_send() {
+  if [[ -n "${CREW_DRY_RUN:-}" ]]; then
+    mut hc send "$@"
+  else
+    ( unset HC_TERMINAL_ID; exec hc send "$@" )
+  fi
+}
+
 # submit_term TERM NAME TEXT: send once, then recover a swallowed Enter only for visible pasted text.
 submit_term() {
   local terminal=$1 name=$2 text=$3 before_turn info status turn screen first_line rc i
   SUBMIT_BLOCKED=0
-  if [[ -n "${CREW_DRY_RUN:-}" ]]; then mut hc send "$terminal" "$text" >/dev/null; return 0; fi
+  if [[ -n "${CREW_DRY_RUN:-}" ]]; then hc_send "$terminal" "$text" >/dev/null; return 0; fi
   info=$(hc get "$terminal" --json 2>/dev/null || true)
   before_turn=$(jq -r '.turn // empty' <<<"$info" 2>/dev/null || true)
-  if hc send "$terminal" "$text" >/dev/null 2>&1; then
+  if hc_send "$terminal" "$text" >/dev/null 2>&1; then
     :
   else
     rc=$?
@@ -826,8 +839,8 @@ restart_one() {
   jq -se --arg rank "$rank" --arg id "${job:-crew-$rank}" 'length == 1 and (.[0] | type == "object" and .id == $id and .profile == $rank and (.description | type == "string") and (.profileInstructions | type == "string") and (.instructions | type == "string") and (.tools | type == "array" and all(.[]; type == "string")) and (if has("disallowedTools") then .disallowedTools | type == "array" and all(.[]; type == "string") else true end))' <<<"$definition" >/dev/null 2>&1 || die "invalid saved definition; relaunch the team"
 
   if [[ -n "${CREW_DRY_RUN:-}" ]]; then
-    mut hc send "$terminal" /exit
-    mut hc send "$terminal" "$(cat "$cmd")"
+    hc_send "$terminal" /exit
+    hc_send "$terminal" "$(cat "$cmd")"
     return 0
   fi
 
@@ -838,7 +851,7 @@ restart_one() {
     3) die "$name: the agent's pane is gone; relaunch the team" ;;
     *)
       rc=0
-      hc send "$terminal" /exit >/dev/null 2>&1 || rc=$?
+      hc_send "$terminal" /exit >/dev/null 2>&1 || rc=$?
       case $rc in
         0) ;;
         9) die "$name is blocked; needs a person" ;;
@@ -855,7 +868,7 @@ restart_one() {
   esac
 
   rc=0
-  hc send "$terminal" "$(cat "$cmd")" >/dev/null 2>&1 || rc=$?
+  hc_send "$terminal" "$(cat "$cmd")" >/dev/null 2>&1 || rc=$?
   case $rc in
     0) ;;
     9) die "$name is blocked; needs a person" ;;

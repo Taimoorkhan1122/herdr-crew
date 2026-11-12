@@ -2,6 +2,14 @@
 
 Status as of 2026-11-03. The runtime on branch `feat/herdr-core-app-runtime` is `herdr-core` (`hc`) plus the Herdr desktop app; that branch is not merged, and no live crew has run on it. The live evidence below was collected on the legacy `herdr` runtime. Full development acceptance remains pending. Two live problems are open: the Haiku driver claimed it had no shell, and the Manager used an archived task number. Live test 3 (review and test teams) has not run. Verification is tracked per feature below; launch tests do not establish full lifecycle acceptance.
 
+## Live crew failure: hc note framing on /exit (2026-11-12)
+
+- A live crew on `hc` 0.1.20 exposed a restart failure. The Manager restarted the Lead, and the Lead received `<hc from="t53">/exit</hc>` as a chat message. It answered instead of exiting, so `restart` waited for a shell prompt and timed out. The same framing wrapped the saved command and brief.
+- Cause: `hc send` adds `<hc from="...">` note framing when an agent terminal messages its parent. There is no per-send raw flag. The configured `notes = false` switch is core-level, and a scoped `XDG_CONFIG_HOME` config did not suppress the framing in a controlled test. Clearing `HC_TERMINAL_ID` did.
+- Fix: `hc_send` in `bin/crew` runs `hc send` with `HC_TERMINAL_ID` unset for every literal input path: `/exit`, the saved command, first/restart briefs and `say` messages. `HC_TERMINAL_SOCKET` and `HC_SOCKET` stay set. [ADR 0026](adr/0026-literal-sends-drop-agent-identity.md) records the decision.
+- Evidence: a controlled reproduction used two status-reporting stub terminals (`state=done:app=claude-code`) in a parent/child pair. With the identity set, the parent received `<hc from="t6b probe-child3">NOTETEST2</hc>`; with it unset, the parent received `RAWTEST2`. `test/dry-run.sh` now records `HC_TERMINAL_ID` for every fixture `send` and asserts the restart sends clear it. That suite, `test/worktrees.sh`, `test/agent-config.sh`, `test/project-launch.sh` and `test/review-regressions.sh` pass.
+- Limit: no live restart has run after the fix. The live crew used an installed copy at `~/.agents/skills/herdr-crew`, which is not a git checkout; that copy was patched in place. The repository copy and the installed copy differ in other runtime support, so they were not synchronized wholesale.
+
 ## herdr-core and herdr-app runtime cutover (2026-11-03)
 
 - Runtime: `herdr-core` (`hc`) plus the Herdr desktop app. The app owns spaces, tabs and panes. `hc` owns send, read, wait, status and kill. The terminal ID is the control contract. [ADR 0025](adr/0025-herdr-core-app-runtime.md) records the decision.
