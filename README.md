@@ -2,23 +2,23 @@
 
 ![Pixel-art HERDR-CREW command hub: Lead and Manager coordinate engineering, testing, API builds, and investigation around a shared task board.](docs/assets/herdr-crew-banner-landscape.png)
 
-**herdr-crew is a Claude Code skill that launches a multi-agent development crew inside Herdr, with optional roles on OpenCode 2 and Command Code.** One command starts a Lead agent that talks to you, a Manager agent that opens worker teams, and a shared task board (tsk). Development teams work in isolated Git worktrees, write code test-first, review their own work, and leave a branch for you to merge. The investigation team reads the current repository without a new branch or worktree.
+**herdr-crew = Claude Code skill launching multi-agent dev crew inside Herdr, optional roles on OpenCode 2 and Command Code.** One command starts Lead agent (talks to you), Manager agent (opens worker teams), shared task board (tsk). Dev teams work in isolated Git worktrees, write code test-first, self-review, leave branch for you to merge. Investigation team reads current repo, no new branch or worktree.
 
-This is the skill and launcher, not the Rust `herdr` plugin that shares the name. See [how the two projects differ](docs/comparison.md).
+Skill and launcher, not Rust `herdr` plugin with same name. See [how the two projects differ](docs/comparison.md).
 
-**Experimental:** automated launcher checks pass, but full live development acceptance is pending. See [known limitations](#known-limitations) and [verification status](docs/STATE.md).
+**Experimental:** automated launcher checks pass; full live dev acceptance pending. See [known limitations](#known-limitations) and [verification status](docs/STATE.md).
 
 ## What you get
 
-- A **Lead** that plans work, may ask you questions, and owns the board; a **Manager** that starts teams and watches workers.
-- Job agents for implementation, testing, review, bug triage and investigation, plus stackable domain personas for NestJS, React, UI and security work.
-- A shared **tsk** task board with the states `open -> ready -> started -> review -> done`.
-- Isolated Git worktrees for each development team; the investigation team reads the current repository.
+- **Lead** plans work, may ask questions, owns board; **Manager** starts teams, watches workers.
+- Job agents for implementation, testing, review, bug triage, investigation, plus stackable domain personas for NestJS, React, UI, security.
+- Shared **tsk** board, states `open -> ready -> started -> review -> done`.
+- Isolated Git worktree per dev team; investigation team reads current repo.
 - Human approval before any push, merge or worktree removal.
 
 ## How it works
 
-A crew lives in one app tab. The Lead and the Manager sit at the top, and the board sits under the Lead:
+Crew lives in one app tab. Lead and Manager on top, board under Lead:
 
 ```
 +------------------------+------------------------+
@@ -29,7 +29,7 @@ A crew lives in one app tab. The Lead and the Manager sit at the top, and the bo
 +------------------------+------------------------+
 ```
 
-The Lead splits your job into tasks, such as T1 and T2. The Manager starts a team for each task in its own tab. A development team tab such as "T7 pair" uses a worktree at `~/.herdr/worktrees/<slug>/T7-pair`. An "investigate" tab uses the current repository. The `<slug>` is a short id for your repository:
+Lead splits job into tasks (T1, T2). Manager starts team per task in own tab. Dev team tab like "T7 pair" uses worktree at `~/.herdr/worktrees/<slug>/T7-pair`. "investigate" tab uses current repo. `<slug>` = short repo id:
 
 ```
 +------------------------+------------------------+
@@ -39,32 +39,32 @@ The Lead splits your job into tasks, such as T1 and T2. The Manager starts a tea
    worktree: ~/.herdr/worktrees/<slug>/T7-pair
 ```
 
-Each task moves through these states on the board:
+Each task moves through these board states:
 
 ```
 open -> ready -> started -> review -> done
 ```
 
-The Lead marks tasks `ready`. Agents mark them `started` and `review`. For development, the Manager marks `done` after code-review approval; you still merge the branch. For investigation, the Manager checks answer coverage and marks `done` without a merge branch. A task is `blocked` when information prevents progress, or when development review is not approved after three rounds. Standalone jobs without a Manager leave results at `review` for manual acceptance.
+Lead marks tasks `ready`. Agents mark `started` and `review`. Dev: Manager marks `done` after code-review approval; you still merge branch. Investigation: Manager checks answer coverage, marks `done`, no merge branch. Task `blocked` when missing info prevents progress, or dev review not approved after three rounds. Standalone jobs without Manager leave results at `review` for manual acceptance.
 
-Agents talk with `herdr-crew say <agent> "<message>"` and report with `herdr-crew mark <T#> <status> "<note>"`. The mark command updates the board, adds the note as a step, and renames the saved tab to `<label> · <agent>: <note>`.
+Agents talk via `herdr-crew say <agent> "<message>"`, report via `herdr-crew mark <T#> <status> "<note>"`. Mark updates board, adds note as step, renames saved tab to `<label> · <agent>: <note>`.
 
 ## Requirements
 
-- **herdr-app**, the desktop app, and **herdr-core** (`hc`) on your PATH. The app owns spaces, tabs and panes. `hc` owns send, read, wait, status and kill. Crew control actions address saved terminal IDs. Install both from <https://herdr.dev/download>; the app installer also installs `herdr-core` when it is missing. Supported desktops are Apple Silicon macOS, Linux x86-64 or ARM64 with Vulkan, and Windows x64.
-- **A desktop session.** `launch`, `team`, `say`, `mark`, `status`, `watch`, `close` and `restart` need a running app window that answers `herdr-app status`. A server, container or CI runner without a desktop session cannot run them. `help`, `--version`, `completion`, `init`, `upgrade` and `configure` still work without the app.
-- **A CLI for every role you assign**: **Claude Code** (the default), **OpenCode 2**, or **Command Code** (`cmd`, version 1.88.5 or later). Mixed-agent teams need each selected CLI on PATH. Authenticate each CLI separately before launching a crew; the launcher does not check credentials or model access.
-- **tsk**, the task board. Install it with `brew install smarzban/tap/tsk`, then run `tsk setup claude` once to register tsk with Claude Code. The board is a plain `tsk` terminal in the crew tab. `tsk setup herdr` and `herdr server reload-config` no longer apply.
-- **jq**, **git**, **rg** (ripgrep), and **shasum**. The launcher uses rg for visible-paste detection and shasum for the repository slug.
-- **npm**, only if you want `install-skills` to install the AXI tools.
-- Bash and a `readlink` command supporting `-f` (the launcher resolves symlinks with it).
+- **herdr-app** (desktop app) and **herdr-core** (`hc`) on PATH. App owns spaces, tabs, panes. `hc` owns send, read, wait, status, kill. Crew control actions address saved terminal IDs. Install both from <https://herdr.dev/download>; app installer also installs `herdr-core` if missing. Supported desktops: Apple Silicon macOS, Linux x86-64 or ARM64 with Vulkan, Windows x64.
+- **Desktop session.** `launch`, `team`, `say`, `mark`, `status`, `watch`, `close`, `restart` need running app window answering `herdr-app status`. Server, container, CI runner without desktop session cannot run them. `help`, `--version`, `completion`, `init`, `upgrade`, `configure` still work without app.
+- **CLI for every assigned role**: **Claude Code** (default), **OpenCode 2**, or **Command Code** (`cmd`, 1.88.5+). Mixed-agent teams need each selected CLI on PATH. Authenticate each CLI separately before launch; launcher does not check credentials or model access.
+- **tsk** task board. Install with `brew install smarzban/tap/tsk`, then run `tsk setup claude` once to register with Claude Code. Board = plain `tsk` terminal in crew tab. `tsk setup herdr` and `herdr server reload-config` no longer apply.
+- **jq**, **git**, **rg** (ripgrep), **shasum**. Launcher uses rg for visible-paste detection, shasum for repo slug.
+- **npm**, only if you want `install-skills` to install AXI tools.
+- Bash and `readlink` supporting `-f` (launcher resolves symlinks with it).
 
-Run `herdr-crew doctor` to check this list in one pass. It reports every missing requirement with its fix, works before the runtime tools are installed, and changes nothing. Credentials and model access are not checked.
+Run `herdr-crew doctor` to check list in one pass. Reports every missing requirement with fix, works before runtime tools installed, changes nothing. Credentials and model access not checked.
 
 ## Quick start
 
 1. Install **herdr-app** and **herdr-core** from <https://herdr.dev/download>, then confirm `hc --version` and `herdr-app --version`.
-2. Clone this repository and link the launcher and skill into place:
+2. Clone repo, link launcher and skill into place:
 
 ```bash
 project_dir="$(pwd -P)"
@@ -73,30 +73,30 @@ ln -s "$project_dir/bin/crew" "$HOME/.local/bin/herdr-crew"
 ln -s "$project_dir" "$HOME/.claude/skills/herdr-crew"
 ```
 
-3. Check and install the persona skills:
+3. Check and install persona skills:
 
 ```bash
 ~/.claude/skills/herdr-crew/bin/install-skills --check
 ~/.claude/skills/herdr-crew/bin/install-skills
 ```
 
-4. Check that your machine can launch a crew:
+4. Check machine can launch crew:
 
 ```bash
 herdr-crew doctor
 ```
 
-It reports every missing requirement in one pass, each with its fix, and exits 0 when you are ready. Warnings (such as an uninitialized project baseline) do not block a launch.
+Reports every missing requirement in one pass with fix, exits 0 when ready. Warnings (e.g. uninitialized project baseline) don't block launch.
 
-5. Open a terminal in Herdr, change into your repository, and start a crew:
+5. Open terminal in Herdr, cd into repo, start crew:
 
 ```
 /herdr-crew lead "Add a CSV export button to the reports page"
 ```
 
-The tab opens in the background: switch to it yourself. The Lead proposes tasks, the Manager opens a tab per task, and you watch progress on the board, in the team tab titles, and with `herdr-crew status`.
+Tab opens in background: switch to it yourself. Lead proposes tasks, Manager opens tab per task; watch progress on board, team tab titles, and `herdr-crew status`.
 
-The [quick start guide](docs/quickstart.md) covers every step, including skill installation and what a normal session looks like. If a launch fails, run `herdr-crew doctor` and act on its fixes; the [troubleshooting guide](docs/troubleshooting.md) covers the failures it cannot fix.
+[Quick start guide](docs/quickstart.md) covers every step, incl. skill install and normal session. If launch fails, run `herdr-crew doctor` and act on fixes; [troubleshooting guide](docs/troubleshooting.md) covers failures it can't fix.
 
 ## Documentation
 
@@ -116,32 +116,32 @@ The [quick start guide](docs/quickstart.md) covers every step, including skill i
 
 ## Frequently asked questions
 
-**Do I need Herdr?** Yes. The app owns spaces, tabs and panes, and `hc` controls the terminals. Headless servers, containers and CI runners are unsupported.
+**Do I need Herdr?** Yes. App owns spaces, tabs, panes; `hc` controls terminals. Headless servers, containers, CI runners unsupported.
 
-**Is this the same as the other GitHub project called herdr-crew?** No. This is a Claude Code skill and Bash launcher. The other well-known repository is a Rust Herdr plugin configured by `.herdr/crew.toml`. See the [comparison](docs/comparison.md).
+**Is this the same as the other GitHub project called herdr-crew?** No. This = Claude Code skill + Bash launcher. Other well-known repo = Rust Herdr plugin configured by `.herdr/crew.toml`. See [comparison](docs/comparison.md).
 
-**Does herdr-crew push or merge my changes?** No. Merging is your decision, crew instructions require approval, and member sessions have explicit Bash denies for `git push` and `git merge`.
+**Does herdr-crew push or merge my changes?** No. Merging is your call, crew instructions require approval, member sessions have explicit Bash denies for `git push` and `git merge`.
 
-**Which coding agents can run?** Claude Code (the default), OpenCode 2, and Command Code 1.88.5 or later, assigned per role. Codex, Gemini and other agent kinds need permission and lifecycle adapters. See [OpenCode 2 support](docs/opencode-support.md) and [Command Code support](docs/command-code-support.md).
+**Which coding agents can run?** Claude Code (default), OpenCode 2, Command Code 1.88.5+, assigned per role. Codex, Gemini, other agents need permission and lifecycle adapters. See [OpenCode 2 support](docs/opencode-support.md) and [Command Code support](docs/command-code-support.md).
 
-The [FAQ](docs/faq.md) answers more questions about worktrees, state, context limits and Windows.
+[FAQ](docs/faq.md) answers more on worktrees, state, context limits, Windows.
 
 ## Known limitations
 
-- The runtime needs a desktop session. `launch`, `team`, `close` and the other runtime commands do not work on a headless server, container or CI runner.
-- Restart reuses the terminal only after a normal agent exit. After `hc kill`, or when the terminal reports `finished`, relaunch the team.
-- Worktrees are never removed automatically. Run the removal command that `close` prints.
-- Unverified on this runtime: an app restart with live terminals, pane title behavior, the split ratio, headless use, and a real permission-blocked agent. No live crew has run since the migration.
-- Visual planning has automated launch/instruction checks and a browser-checked example. Live Lead/planner approval, revision, offline fallback and restart acceptance remain pending.
-- Command Code enforcement is native tool hooks and command patterns, not an operating-system sandbox. A manager or inspector shell command can still write files by redirection, and an alias or wrapper around `git push` can evade the member block.
-- Command Code has no transcript hook and no asynchronous Monitor tool. Its context warning is best-effort; a live run reported no token count, so the warning may not fire.
-- The Command Code model catalog's offline fallback validates syntax only, so it can accept an ID that the runtime later rejects.
+- Runtime needs desktop session. `launch`, `team`, `close` and other runtime commands fail on headless server, container, CI runner.
+- Restart reuses terminal only after normal agent exit. After `hc kill`, or when terminal reports `finished`, relaunch team.
+- Worktrees never removed automatically. Run removal command `close` prints.
+- Unverified on this runtime: app restart with live terminals, pane title behavior, split ratio, headless use, real permission-blocked agent. No live crew run since migration.
+- Visual planning has automated launch/instruction checks and browser-checked example. Live Lead/planner approval, revision, offline fallback, restart acceptance pending.
+- Command Code enforcement = native tool hooks and command patterns, not OS sandbox. Manager or inspector shell command can still write files via redirection; alias or wrapper around `git push` can evade member block.
+- Command Code has no transcript hook, no async Monitor tool. Context warning best-effort; live run reported no token count, so warning may not fire.
+- Command Code model catalog offline fallback validates syntax only, so may accept ID runtime later rejects.
 
-The [troubleshooting guide](docs/troubleshooting.md) covers every limitation, including message delivery, tab titles, `tsk` step rules, custom project jobs and skills with `UNKNOWN` sources.
+[Troubleshooting guide](docs/troubleshooting.md) covers every limitation, incl. message delivery, tab titles, `tsk` step rules, custom project jobs, skills with `UNKNOWN` sources.
 
 ## Testing
 
-From the skill directory, run:
+From skill directory, run:
 
 ```bash
 /bin/bash test/dry-run.sh
@@ -150,9 +150,9 @@ From the skill directory, run:
 /bin/bash test/agent-config.sh
 ```
 
-The test puts fake `hc`, `herdr-app`, `tsk`, and `git` commands first on your PATH, and checks the calls they record. No real agents start and no real tasks are made. Each check prints `PASS` or `FAIL`, and the run ends with `ALL PASS` or a failure count.
+Test puts fake `hc`, `herdr-app`, `tsk`, `git` first on PATH, checks recorded calls. No real agents start, no real tasks made. Each check prints `PASS` or `FAIL`; run ends with `ALL PASS` or failure count.
 
-`test/worktrees.sh` uses real Git with fake core/app and tsk commands and a disposable HOME. It checks branch attachment, retained edits, reuse, and ownership refusals. Neither suite establishes live agent behavior. [STATE.md](docs/STATE.md) separates automated checks from live acceptance and remaining gaps.
+`test/worktrees.sh` uses real Git with fake core/app and tsk commands and disposable HOME. Checks branch attachment, retained edits, reuse, ownership refusals. Neither suite proves live agent behavior. [STATE.md](docs/STATE.md) separates automated checks from live acceptance and remaining gaps.
 
 ## File layout
 
@@ -177,7 +177,7 @@ herdr-crew/
 
 ## Docs
 
-The `docs/` folder has two kinds of material. Start with the user guides above, or browse the [docs index](docs/README.md). The internal records are [STATE.md](docs/STATE.md), [PROGRESS.md](docs/PROGRESS.md), and the [ADRs](docs/adr/).
+`docs/` holds two kinds of material. Start with user guides above, or browse [docs index](docs/README.md). Internal records: [STATE.md](docs/STATE.md), [PROGRESS.md](docs/PROGRESS.md), [ADRs](docs/adr/).
 
 ## License
 
