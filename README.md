@@ -2,7 +2,7 @@
 
 ![Pixel-art HERDR-CREW command hub: Lead and Manager coordinate engineering, testing, API builds, and investigation around a shared task board.](docs/assets/herdr-crew-banner-landscape.png)
 
-**herdr-crew = Claude Code skill launching multi-agent dev crew inside Herdr, optional roles on OpenCode 2 and Command Code.** One command starts Lead agent (talks to you), Manager agent (opens worker teams), shared task board (tsk). Dev teams work in isolated Git worktrees, write code test-first, self-review, leave branch for you to merge. Investigation team reads current repo, no new branch or worktree.
+**herdr-crew = deterministic multi-agent orchestration framework for coding agents, shipped as Claude Code skill and Bash launcher. Runs agent crews inside Herdr, optional roles on OpenCode 2 and Command Code.** One command starts Lead agent (talks to you), Manager agent (opens worker teams), shared task board (tsk) — declarative agent definitions, native permission enforcement, git worktree isolation per team, and a fixed `ready -> started -> review -> done` workflow with review gates. Dev teams write code test-first, self-review, leave branch for you to merge. Investigation team reads current repo, no new branch or worktree.
 
 Skill and launcher, not Rust `herdr` plugin with same name. See [how the two projects differ](docs/comparison.md).
 
