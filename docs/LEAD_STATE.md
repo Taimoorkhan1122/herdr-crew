@@ -1,6 +1,32 @@
 # Lead state and session checkpoint
 
-## Active checkpoint: SEO/GEO metadata and documentation split
+## Active checkpoint: issue #12 implemented (tickets #13-#19)
+
+Updated: 2026-11-17 (Asia/Karachi). Branch `main` at 5c6c337; all changes uncommitted. Untracked `.commandcode/`, `.herdr-crew/`, `HANDOFF.md` and `docs/project-review-2026-11-16.md` preserved.
+
+Objective and authorization: the user set a standing goal to implement issue #12 (doctor + shorter SKILL.md) directly in-session with ponytail ultra. Implementation, tests and documentation are authorized; commit, push, merge, installation and live crew launch are not. Tickets #13-#19 were published as sub-issues of #12 with native blocked-by edges and `ready-for-agent`.
+
+Completed: T13 declared the Manager's `caveman:caveman` plugin in rank metadata and `skills.sources` and removed the manual caveats; T14-T17 added the read-only `herdr-crew doctor [--json]` (dispatched before the dependency gates; required tools, app window, assigned runtime CLIs via a new non-dying `agent_selection_run` + report-only preflight, skills via `install-skills --check`, installation integrity, baseline state, not-checked line; verdict last; exit 0 ready / 1 missing); T18 shortened `SKILL.md` 87 lines/12,086 bytes to 39 lines/2,978 bytes with every moved statement verified in its destination; T19 wired README, quick start, troubleshooting, reference, feature reference, ADR 0028, STATE and PROGRESS. Evidence in `docs/STATE.md` and `docs/PROGRESS.md` (2026-11-17 entries).
+
+Verification: `/bin/bash test/doctor.sh` exit 0 (17 checks), `test/dry-run.sh`, `test/worktrees.sh`, `test/agent-config.sh`, `test/project-launch.sh`, `test/installer-agents.sh`, `test/review-regressions.sh`, `test/partial-init.sh` each exit 0; `/bin/bash -n` on changed scripts exit 0; `git diff --check` clean. Live read-only smoke run of `./bin/crew doctor` on this machine worked and reported real findings (three missing skills/AXI tools; both installed skill copies diverge from this checkout). Hermetic fixtures only: no live Herdr, agents or tasks.
+
+Next: 1) commit these changes only when asked. 2) Live end-to-end acceptance on a disposable fixture remains the top review recommendation and needs explicit authorization. 3) Update the installed launcher/skill copies only when asked; the doctor now warns about the divergence.
+
+## Historical checkpoint: project review recorded
+
+Updated: 2026-11-16 14:16 PKT (Asia/Karachi). Branch `main` at 5c6c337 (PR #11 merged, which includes the documentation split and send fix from the previous checkpoint). Uncommitted: this checkpoint plus `docs/project-review-2026-11-16.md` and its entries in `docs/README.md`, `docs/PROGRESS.md` and `docs/STATE.md`. Untracked `.commandcode/` and `HANDOFF.md` are preserved.
+
+Objective and authorization: the user asked for an honest rating and improvement areas, then asked to record them. Recording in docs is authorized. Implementing any improvement, commit, push, live launch and deleting `HANDOFF.md` are not authorized.
+
+Completed: review saved with rating 6/10 and seven prioritized improvements. Evidence: `test/dry-run.sh`, `test/worktrees.sh`, `test/agent-config.sh` and `test/project-launch.sh` each exited 0 at 5c6c337. Not run: `test/review-regressions.sh`, hook suites, ShellCheck, live acceptance.
+
+Work in hand: none running. Unknown: whether the live crew recovery from the previous checkpoint (restart Lead and Manager with the patched installed launcher) happened; treat it as pending.
+
+Spec published: issue #12 (`ready-for-agent`, label created with user authorization) covers review items 3 and 4, a read-only `herdr-crew doctor` and a shorter `SKILL.md`. Test seam confirmed by the user: the doctor process under the hermetic launcher fixtures. Implementation is not authorized yet.
+
+Next: 1) Ask the user which review items to approve; recommended first is one live end-to-end acceptance on a disposable fixture, which needs explicit authorization. Issue #12 implementation also awaits approval. 2) Recheck the five findings in `docs/maintainability-review-2026-10-14.md` against current `bin/crew`. 3) Commit these doc records only when asked.
+
+## Historical checkpoint: SEO/GEO metadata and documentation split
 
 Updated: 2026-11-12 16:42 PKT (Asia/Karachi). Repository `Taimoorkhan1122/herdr-crew`, branch `main` at 3a70672 tracking `origin/main`; the file changes are uncommitted. Untracked `.commandcode/` and `HANDOFF.md` are preserved.
 

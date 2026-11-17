@@ -19,6 +19,7 @@ emil-design-eng emilkowalski/skills
 web-design-guidelines vercel-labs/agent-skills
 vercel-react-best-practices vercel-labs/agent-skills
 ponytail:ponytail-review plugin ponytail@ponytail
+caveman:caveman plugin caveman@caveman
 context7-mcp UNKNOWN
 supabase supabase/agent-skills
 supabase-postgres-best-practices supabase/agent-skills

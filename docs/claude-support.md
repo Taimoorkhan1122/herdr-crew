@@ -6,7 +6,7 @@ Claude Code is the default runtime for herdr-crew. The launcher starts each role
 
 - **Claude Code** must be on PATH and authenticated. Mixed-agent teams that also use OpenCode or Command Code need each selected CLI on PATH, authenticated separately.
 - The default installation registers tsk with Claude Code: run `tsk setup claude` once. `tsk setup herdr` and `herdr server reload-config` no longer apply.
-- The Manager requires the `caveman:caveman` plugin skill. `install-skills --check` does not detect this requirement, so install it separately before launching a crew.
+- The Manager requires the `caveman:caveman` plugin skill, which `install-skills --check` reports and can install like any other required skill.
 
 ## What the launcher passes
 
@@ -40,7 +40,7 @@ The handoff is saved to `~/.herdr/crew/<slug>/handoff-<agent>.md`, and the task 
 
 ## Skills
 
-`install-skills` checks and installs the persona skills for Claude. Claude plugin skills are not automatically portable to other runtimes. The Manager's `caveman:caveman` plugin skill and several domain skills with `UNKNOWN` sources need manual installation; see [Troubleshooting](./troubleshooting.md#skills-with-unknown-sources).
+`install-skills` checks and installs the persona skills for Claude, including the Manager's `caveman:caveman` plugin skill. Claude plugin skills are not automatically portable to other runtimes. Several domain skills with `UNKNOWN` sources need manual installation; see [Troubleshooting](./troubleshooting.md#skills-with-unknown-sources).
 
 ## Known Claude-specific gaps
 

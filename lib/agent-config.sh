@@ -90,12 +90,19 @@ config_validate() {
 
 # agent_selection RANK JOB: sets AGENT_KIND/MODEL/EFFORT and a JSON snapshot.
 agent_selection() {
+  agent_selection_run "$@" || die "$SELECT_ERR"
+}
+
+# agent_selection_run: the same selection without die. On failure it sets SELECT_ERR
+# and returns 1, so a caller can report the failure and keep running (the doctor).
+agent_selection_run() {
   local rank=$1 job=${2:-} kind model effort
+  SELECT_ERR=""
   # Only OpenCode carries the effort in the model variant.
   local variant_efforts='["opencode"]'
   local def
-  def=$(agent_definition "${job:-crew-$rank}") || die "unknown agent '${job:-crew-$rank}'"
-  [[ "$(jq -r .profile <<<"$def")" == "$rank" ]] || die "agent '$job' does not use profile '$rank'"
+  def=$(agent_definition "${job:-crew-$rank}") || { SELECT_ERR="unknown agent '${job:-crew-$rank}'"; return 1; }
+  [[ "$(jq -r .profile <<<"$def")" == "$rank" ]] || { SELECT_ERR="agent '$job' does not use profile '$rank'"; return 1; }
   kind=$(jq -r '.kind // "claude"' <<<"$def")
   model=$(jq -r '.model // ""' <<<"$def"); effort=$(jq -r '.effort // ""' <<<"$def")
   if runtime_ignores_profile_model "$kind"; then model=""; effort=""; fi

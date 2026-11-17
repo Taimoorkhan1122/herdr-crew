@@ -59,6 +59,8 @@ Agents talk with `herdr-crew say <agent> "<message>"` and report with `herdr-cre
 - **npm**, only if you want `install-skills` to install the AXI tools.
 - Bash and a `readlink` command supporting `-f` (the launcher resolves symlinks with it).
 
+Run `herdr-crew doctor` to check this list in one pass. It reports every missing requirement with its fix, works before the runtime tools are installed, and changes nothing. Credentials and model access are not checked.
+
 ## Quick start
 
 1. Install **herdr-app** and **herdr-core** from <https://herdr.dev/download>, then confirm `hc --version` and `herdr-app --version`.
@@ -78,7 +80,15 @@ ln -s "$project_dir" "$HOME/.claude/skills/herdr-crew"
 ~/.claude/skills/herdr-crew/bin/install-skills
 ```
 
-4. Open a terminal in Herdr, change into your repository, and start a crew:
+4. Check that your machine can launch a crew:
+
+```bash
+herdr-crew doctor
+```
+
+It reports every missing requirement in one pass, each with its fix, and exits 0 when you are ready. Warnings (such as an uninitialized project baseline) do not block a launch.
+
+5. Open a terminal in Herdr, change into your repository, and start a crew:
 
 ```
 /herdr-crew lead "Add a CSV export button to the reports page"
@@ -86,7 +96,7 @@ ln -s "$project_dir" "$HOME/.claude/skills/herdr-crew"
 
 The tab opens in the background: switch to it yourself. The Lead proposes tasks, the Manager opens a tab per task, and you watch progress on the board, in the team tab titles, and with `herdr-crew status`.
 
-The [quick start guide](docs/quickstart.md) covers every step, including the manual `caveman:caveman` prerequisite and what a normal session looks like.
+The [quick start guide](docs/quickstart.md) covers every step, including skill installation and what a normal session looks like. If a launch fails, run `herdr-crew doctor` and act on its fixes; the [troubleshooting guide](docs/troubleshooting.md) covers the failures it cannot fix.
 
 ## Documentation
 
@@ -135,6 +145,7 @@ From the skill directory, run:
 
 ```bash
 /bin/bash test/dry-run.sh
+/bin/bash test/doctor.sh
 /bin/bash test/worktrees.sh
 /bin/bash test/agent-config.sh
 ```

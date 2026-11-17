@@ -43,6 +43,7 @@ ${U_BLD}COMMANDS${U_OFF}
   ${U_BLU}init${U_OFF}        Initialize the project baseline
   ${U_BLU}upgrade${U_OFF}     Preview or apply selected baseline updates
   ${U_BLU}configure${U_OFF}   Set the agent, model and effort of each rank and job
+  ${U_BLU}doctor${U_OFF}      Check what a crew launch needs, read-only, in one pass
   ${U_BLU}launch${U_OFF}      Start a crew, or a job persona with a new task and its team
   ${U_BLU}team${U_OFF}        Start the team of an existing task
   ${U_BLU}say${U_OFF}         Send a message to a running agent
@@ -126,6 +127,32 @@ EXAMPLES
   herdr-crew configure driver opencode --model provider/model --effort high
   herdr-crew configure driver command-code --model deepseek/deepseek-v4.1-flash --effort high
   herdr-crew configure --show
+EOF
+}
+
+usage_doctor() {
+  cat <<'EOF'
+USAGE
+  herdr-crew doctor [--json]
+
+DESCRIPTION
+  Read-only readiness check. Reports every missing requirement for a crew
+  launch in one pass, each with its fix, and prints a final verdict. It runs
+  before the launcher's dependency checks, so it works when jq, tsk, hc or
+  herdr-app are missing. It installs nothing, initializes nothing and opens
+  no tabs; --dry-run prints the same output. Credentials and model access
+  are not checked.
+
+  Exit status is 0 when nothing required is missing (warnings allowed) and 1
+  otherwise.
+
+OPTIONS
+  --json   Print one JSON document on stdout with every check (name, status,
+           detail, fix) and the verdict, for scripts and agents.
+
+EXAMPLES
+  herdr-crew doctor
+  herdr-crew doctor --json | jq -r '.checks[] | select(.status != "ok")'
 EOF
 }
 
@@ -350,7 +377,7 @@ cmd_completion() {
 _herdr_crew() {
   local cur commands
   cur="${COMP_WORDS[COMP_CWORD]}"
-  commands="init upgrade configure launch team say read wait mark status close watch handoff restart completion help"
+  commands="init upgrade configure doctor launch team say read wait mark status close watch handoff restart completion help"
   if (( COMP_CWORD == 1 )); then
     COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
   else
@@ -365,7 +392,7 @@ EOF
 # zsh completion for herdr-crew. Source it from a directory on your fpath.
 _herdr_crew() {
   local -a commands
-  commands=(init upgrade configure launch team say read wait mark status close watch handoff restart completion help)
+  commands=(init upgrade configure doctor launch team say read wait mark status close watch handoff restart completion help)
   _describe -t commands 'herdr-crew command' commands
 }
 _herdr_crew "$@"

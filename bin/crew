@@ -1115,6 +1115,170 @@ cmd_restart() {
   fi
 }
 
+# Doctor: read-only readiness report. Dispatched before the dependency gates, so it
+# can report every missing tool in one pass instead of stopping at the first one.
+# It installs nothing, initializes nothing and opens no tabs; --dry-run prints the
+# same output. JSON strings are static launcher text without quotes or backslashes.
+DOCTOR_RESULTS=""
+doctor_add() { DOCTOR_RESULTS+="$1"$'\t'"$2"$'\t'"$3"$'\t'"$4"$'\n'; }
+
+doctor_fix() { # the launcher's own install instruction for a required tool
+  case "$1" in
+    git) printf 'install git (https://git-scm.com)' ;;
+    jq) printf 'install: brew install jq' ;;
+    rg) printf 'install: brew install ripgrep' ;;
+    shasum) printf 'install the Xcode command line tools: xcode-select --install' ;;
+    tsk) printf 'install: brew install smarzban/tap/tsk' ;;
+    hc) printf 'install herdr-core: https://herdr.dev/download' ;;
+    herdr-app) printf 'install the Herdr desktop app: https://herdr.dev/download' ;;
+  esac
+}
+
+cmd_doctor() {
+  local json=0 name status detail fix missing=0 role rank job err
+  if [[ "${1:-}" == --json ]]; then json=1; shift; fi
+  [[ $# -eq 0 ]] || die "usage: herdr-crew doctor [--json]"
+  for name in git jq rg shasum tsk hc herdr-app; do
+    fix=$(doctor_fix "$name")
+    if command -v "$name" >/dev/null 2>&1; then
+      doctor_add "$name" ok "on PATH" ""
+    else
+      doctor_add "$name" missing "not on PATH" "$fix"
+      missing=$((missing + 1))
+    fi
+  done
+  # The Herdr app window: when the binary is present its status call decides
+  # reachability; when it is absent the missing binary above is the whole report.
+  if command -v herdr-app >/dev/null 2>&1; then
+    if herdr-app status >/dev/null 2>&1; then
+      doctor_add "app window" ok "herdr-app status answered" ""
+    else
+      doctor_add "app window" missing "herdr-app status failed" "open a Herdr app window and try again"
+    fi
+  fi
+  # Required skills, plugins and AXI tools come from the installer's report-only
+  # mode; its discovery stays the single source of requirement truth. Its parsing
+  # needs jq, so like the runtime checks it is skipped when jq is missing.
+  if command -v jq >/dev/null 2>&1 && [[ -f "$ROOT/bin/install-skills" ]]; then
+    set +e
+    skill_out=$("$ROOT/bin/install-skills" --check 2>&1)
+    skill_rc=$?
+    set -e
+    if (( skill_rc == 0 )); then
+      doctor_add "required skills" ok "all required skills, plugins and AXI tools present" ""
+    else
+      skill_names=$(printf '%s\n' "$skill_out" | awk '/MISSING|BLOCKED/{printf "%s ", $1}' | sed 's/ $//')
+      doctor_add "required skills" missing "missing: ${skill_names:-unknown items}" "run bin/install-skills in the herdr-crew checkout to install"
+    fi
+  fi
+  # Installation integrity: the launcher on PATH and the installed skill copies
+  # should resolve to this checkout. A divergent copy or a missing install is a
+  # warning, never a launch blocker: an agent can run the launcher directly.
+  launcher_bin=$(command -v herdr-crew 2>/dev/null || true)
+  if [[ -n "$launcher_bin" ]]; then
+    doctor_add "launcher" ok "herdr-crew is on PATH" ""
+  else
+    doctor_add "launcher" warning "herdr-crew is not on PATH" "agents can run $ROOT/bin/crew directly, or link it per the quick start"
+  fi
+  for inst in "claude:$HOME/.claude/skills/herdr-crew" "portable:$HOME/.agents/skills/herdr-crew"; do
+    label=${inst%%:*}; dir=${inst#*:}
+    if [[ ! -e "$dir" ]]; then
+      doctor_add "skill installation ($label)" warning "not installed at $dir" "an agent can run the launcher directly, or link the checkout: ln -s \"$ROOT\" \"$dir\""
+    else
+      resolved=$(readlink -f "$dir" 2>/dev/null || printf '%s' "$dir")
+      if [[ "$resolved" == "$ROOT" ]]; then
+        doctor_add "skill installation ($label)" ok "resolves to the launcher checkout" ""
+      else
+        doctor_add "skill installation ($label)" warning "resolves to $resolved, the launcher uses $ROOT" "relink the copy to the checkout: ln -s \"$ROOT\" \"$dir\" (see the quick start)"
+      fi
+    fi
+  done
+  # Project baseline state is informational: the first launch initializes it.
+  if [[ -f "${CONFIG_ROOT:-$REPO}/.herdr-crew/baseline.json" ]]; then
+    doctor_add "project baseline" ok "initialized" ""
+  else
+    doctor_add "project baseline" warning "not initialized" "the first launch initializes it"
+  fi
+  # Runtime checks reuse the exact validation a team launch runs, reported instead
+  # of fatal. They load the project configuration behind the doctor's own tool
+  # checks, so a missing jq is reported above and the runtime section is skipped.
+  # config_load and load_definitions run in a subshell so their die becomes a
+  # report; the subshell returns the config and the definition root (\037-separated).
+  local cfg_ok=1 state cfg_err cfg_err_file
+  if command -v jq >/dev/null 2>&1; then
+    cfg_err_file=$(mktemp "${TMPDIR:-/tmp}/crew-doctor.XXXXXX") || cfg_err_file=""
+    if [[ -n "$cfg_err_file" ]]; then
+      state=$( { config_load; printf '%s\037%s' "$AGENT_CONFIG" "${DEFINITION_ROOT-}"; } 2>"$cfg_err_file" ) || cfg_ok=0
+      cfg_err=$(cat "$cfg_err_file")
+      rm -f "$cfg_err_file"
+      if (( cfg_ok )); then
+        AGENT_CONFIG=${state%%$'\037'*}
+        DEFINITION_ROOT=${state#*$'\037'}
+        # Rank keys in the config are already covered by the rank loop below,
+        # which reads the effective (overridden) selection.
+        config_roles=""
+        while IFS= read -r k; do
+          case " $RANKS " in *" $k "*) ;; *) config_roles="$config_roles $k" ;; esac
+        done < <(jq -r '.roles | keys[]' <<<"$AGENT_CONFIG" 2>/dev/null)
+        for role in $RANKS $config_roles; do
+          case " $RANKS " in *" $role "*) rank=$role; job="" ;;
+          *) rank=$(job_meta "$role" profile); job=$role ;;
+          esac
+          set +e
+          agent_selection_run "$rank" "$job"
+          role_rc=$?
+          set -e
+          if (( role_rc != 0 )); then
+            doctor_add "runtime $role" missing "agent selection failed" "${SELECT_ERR:-runtime selection failed}"
+            continue
+          fi
+          if ! err=$(agent_check 2>&1); then
+            doctor_add "runtime $role" missing "launch preflight failed" "${err#herdr-crew: }"
+            continue
+          fi
+          doctor_add "runtime $role" ok "runtime ${AGENT_KIND}${AGENT_MODEL:+ model $AGENT_MODEL}${AGENT_EFFORT:+ effort $AGENT_EFFORT} validated" ""
+        done
+      else
+        doctor_add "project configuration" missing "cannot load the project configuration" "$(head -1 <<<"${cfg_err#herdr-crew: }")"
+      fi
+    else
+      doctor_add "project configuration" warning "cannot create a temporary file for the configuration report" "check TMPDIR"
+    fi
+  fi
+  missing=$(awk -F'\t' '$2 == "missing" { c++ } END { print c + 0 }' <<<"$DOCTOR_RESULTS")
+  if (( json )); then
+    printf '{"checks":['
+    row=""
+    while IFS=$'\t' read -r name status detail fix; do
+      [[ -n "$name" ]] || continue
+      detail=${detail//\\/}; detail=${detail//\"/\'}; detail=${detail//$'\n'/ }
+      fix=${fix//\\/}; fix=${fix//\"/\'}; fix=${fix//$'\n'/ }
+      printf '%s{"name":"%s","status":"%s","detail":"%s","fix":"%s"}' "${row:+,}" "$name" "$status" "$detail" "$fix"
+      row=1
+    done <<<"$DOCTOR_RESULTS"
+    if (( missing )); then printf '],"not_checked":"credentials and model access","verdict":"not ready","missing":%s}\n' "$missing"
+    else printf '],"not_checked":"credentials and model access","verdict":"ready","missing":0}\n'; fi
+    return $(( missing > 0 ))
+  fi
+  while IFS=$'\t' read -r name status detail fix; do
+    [[ -n "$name" ]] || continue
+    case "$status" in
+      ok) crew_out "$name: ok" ;;
+      missing)
+        if [[ "$detail" == "missing: "* ]]; then crew_out "$name: missing ($detail; $fix)"
+        else crew_out "$name: missing ($fix)"; fi ;;
+      warning) crew_warn "$name: $detail. $fix" ;;
+    esac
+  done <<<"$DOCTOR_RESULTS"
+  crew_info "credentials and model access: not checked"
+  if (( missing )); then
+    crew_out "doctor: not ready ($missing missing). Fix the items above, then run herdr-crew doctor again."
+    return 1
+  fi
+  crew_out "doctor: ready to launch a crew."
+  return 0
+}
+
 # Configuration is local and works without Herdr or tsk installed.
 source "$ROOT/lib/agent-definitions.sh"
 source "$ROOT/lib/project-config.sh"
@@ -1141,6 +1305,8 @@ esac
 if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then show_help "$sub"; exit 0; fi
 # completion prints a static script, so it needs no runtime either.
 [[ "$sub" == completion ]] && { cmd_completion "$@"; exit 0; }
+# doctor reports every gap itself, so it runs before the dependency gates.
+if [[ "$sub" == doctor ]]; then cmd_doctor "$@" || exit $?; exit 0; fi
 command -v jq >/dev/null || die "jq not found on PATH (install: brew install jq)"
 if [[ "$sub" == configure ]]; then cmd_configure "$@"; exit; fi
 if [[ "$sub" == init || "$sub" == upgrade ]]; then project_command "$sub" "$@"; exit; fi
