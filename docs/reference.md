@@ -35,6 +35,15 @@ Bundled job agents have an `agent.json` profile and fill a team slot. Their inst
 | `ui-expert` | domain | any | impeccable, react-component-engineering, react-production-engineering, react-quality-engineering | chrome-devtools-axi | none | Clean UI design and development; desktop/mobile browser evidence. Marketing, motion, and UI review skills load when relevant. |
 | `security-paranoid` | domain | any | none | none | none | Treats every input as hostile, with an exploit scenario for each issue |
 
+For clean UI design and development, the manager selects `ui-expert` for UI tasks and keeps it on each review round:
+
+```bash
+herdr-crew team pair T7 --persona driver=ui-expert --persona navigator=ui-expert
+herdr-crew team review T7 --persona code-reviewer=ui-expert
+```
+
+Launching `member@driver+ui-expert` with instructions on stdin creates the task with the domain attached to the driver; use the explicit pair command above when both pair members need it.
+
 ## Teams
 
 A team is a group of jobs plus a worktree rule. The files live in `teams/`.
@@ -57,6 +66,7 @@ Every command explains itself. `herdr-crew help` lists them, `herdr-crew help <c
 | Command | What it does |
 |---|---|
 | `herdr-crew launch <spec> -` | Starts a crew (`lead`), or a new task with its team (a job spec). Instructions come on stdin, or as words after the spec. Needs the app. |
+| `herdr-crew doctor [--json]` | Read-only readiness check dispatched before the dependency checks. Reports every missing requirement in one pass, each with its fix, then a verdict. Exit 0 ready (warnings allowed), 1 missing. `--json` prints the checks and verdict for scripts. Needs Git only. |
 | `herdr-crew team <team> <T#> [--persona <job>=<domain>[+<domain>]]... ["instructions"]` | Starts a team for an existing task. Refuses if a requested agent already has a live saved terminal; use `say` or `restart`. Optional instructions override the task notes for the brief. Uses `CREW_WS`, then the caller app terminal's `herdr.space` label, then `crew-<slug>` outside an app terminal. |
 | `herdr-crew say <agent> "<message>"` | Sends when the agent is idle or done. For a working agent it waits 20 seconds, then sends if the agent is idle or done. A blocked, still-working or no-terminal recipient gets one queued `[msg from X to Y]` task step when its saved task exists; otherwise the command warns that the message was not delivered. An unknown agent only gets a warning. A busy recipient never fails the command, and a blocked send is never forced. |
 | `herdr-crew read <agent> [--lines N]` | Reads the saved terminal for an agent. Options pass through to `hc read`. |

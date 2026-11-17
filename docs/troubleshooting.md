@@ -2,6 +2,10 @@
 
 Known limitations and failure modes, with the documented behavior and the next action. For verification evidence and open acceptance gaps, see [STATE.md](./STATE.md).
 
+## A launch fails
+
+Run `herdr-crew doctor`. It reports every missing requirement in one pass — required tools, the app window, the runtime CLIs your configuration assigns, required skills, and installation integrity — each with its fix, and a final verdict. Fix the reported items and run it again. `herdr-crew doctor --json` prints the same result for scripts and agents. The sections below cover the failures the doctor cannot fix.
+
 ## The runtime needs a desktop session
 
 `launch`, `team`, `say`, `mark`, `status`, `watch`, `close` and `restart` need a running app window that answers `herdr-app status`. They do not work on a headless server, container or CI runner. `help`, `--version`, `completion`, `init`, `upgrade` and `configure` still work without the app.
@@ -79,10 +83,6 @@ The adapter caches `cmd --list-models` for one day at `~/.herdr/crew/command-cod
 ## Skills with UNKNOWN sources
 
 Some skills in `skills.sources` are `UNKNOWN`: `qa-bug-validator`, `react-production-engineering`, `react-component-engineering`, `react-quality-engineering`, `impeccable`, and `context7-mcp`. `install-skills` cannot fetch them, so install them by hand if they go missing.
-
-## The Manager skill is not detected by `--check`
-
-The Manager requires the `caveman:caveman` plugin skill. `install-skills --check` does not currently detect this requirement, so a passing check alone does not mean all required skills are installed.
 
 ## Status and logging
 

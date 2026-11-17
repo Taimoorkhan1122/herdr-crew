@@ -35,6 +35,7 @@ These files record how herdr-crew got built, why it is built the way it is, and 
 - `superpowers/plans/2026-11-02-herdr-core-app-migration.md`: regression-first plan for the runtime replacement; implemented on branch `feat/herdr-core-app-runtime`, not merged.
 - `PROGRESS.md`: a dated log of each change session, newest first.
 - `maintainability-review-2026-10-14.md`: independent KISS review findings and proposed focused fixes; not implemented.
+- `project-review-2026-11-16.md`: overall rating, usability judgment and prioritized improvements; not implemented.
 - `adr/`: architecture decision records (ADRs). Each file records one decision, its context, and its consequences.
   - `adr/0000-template.md` is the template for new ADRs.
 

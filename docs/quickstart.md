@@ -58,7 +58,15 @@ Check first:
 
 For each missing item it shows the command and asks `[y/N]`. Nothing installs unless you answer `y`. Add `-y` to accept every prompt, but only if you trust the sources in `skills.sources`.
 
-**Manual prerequisite:** the Manager requires the `caveman:caveman` plugin skill. Install that plugin separately before launching a crew. `install-skills --check` does not currently detect this requirement, so a passing check alone does not mean all required skills are installed. Several domain skills also need manual installation because their sources are listed as `UNKNOWN`; see [Troubleshooting](./troubleshooting.md#skills-with-unknown-sources).
+**Manual prerequisite:** several domain skills are listed as `UNKNOWN` in `skills.sources` and need manual installation because the installer cannot fetch them; see [Troubleshooting](./troubleshooting.md#skills-with-unknown-sources).
+
+## 3.5 Check readiness
+
+```bash
+herdr-crew doctor
+```
+
+The doctor reports every missing requirement for a crew launch in one pass — required tools, the app window, the runtime CLIs your configuration assigns, required skills, and installation integrity — each with its fix, and a final verdict. Exit 0 means you can launch (warnings, such as an uninitialized project baseline, do not block). It changes nothing, works before the runtime tools are installed, and never checks credentials or model access. If a launch fails later, run the doctor again and act on its fixes.
 
 ## 4. Start a crew
 

@@ -24,6 +24,9 @@
   "axi": [
     "quota-axi"
   ],
+  "skills": [
+    "caveman:caveman"
+  ],
   "disallowedTools": [
     "Edit",
     "Write"
